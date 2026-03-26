@@ -17,20 +17,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip' # Ускоряет повторные билды
+          cache: 'pip'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.27.0"
+          # Используем версию, которую потребовал flet в логах
+          flutter-version: "3.41.4"
           channel: "stable"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install "flet>=0.24.0"
-          # Если файла requirements.txt нет, команда ниже выдаст ошибку. 
-          # Если он есть, она установит whisper и прочее.
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
           pip install static-ffmpeg
 
@@ -38,16 +37,16 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
+          # --no-interactive критически важен для работы на сервере
+          flet build windows main.py --no-interactive --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
 
       - name: Zip output
         shell: pwsh
         run: |
-          # Проверяем, создалась ли папка build\windows перед архивацией
           if (Test-Path build\windows) {
             Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip -Force
           } else {
-            Write-Error "Build directory not found!"
+            Write-Error "Build directory not found! Check flet build logs above."
             exit 1
           }
 
