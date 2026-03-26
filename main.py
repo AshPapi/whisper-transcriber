@@ -13,8 +13,9 @@ if sys.stdout.encoding != "utf-8":
 if sys.stderr.encoding != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 os.environ.setdefault("PYTHONUTF8", "1")
-os.environ["LC_MESSAGES"] = "C"
-locale.setlocale(locale.LC_MESSAGES, "C")
+if hasattr(locale, "LC_MESSAGES"):
+    os.environ["LC_MESSAGES"] = "C"
+    locale.setlocale(locale.LC_MESSAGES, "C")
 
 import flet as ft
 
