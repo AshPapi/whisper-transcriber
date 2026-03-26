@@ -261,19 +261,19 @@ async def main(page: ft.Page):
     models_dir_field = _text_field(
         value=settings.get("models_dir", DEFAULT_MODELS_DIR),
         hint_text="путь к папке моделей",
-        width=190,
+        width=160,
         height=40,
     )
 
-    model_dd = _dropdown(hint_text="выберите модель", width=160, height=40)
+    model_dd = _dropdown(hint_text="модель", width=140, height=40)
 
     device_dd = _dropdown(
         value=settings.get("device", _default_device()),
         options=[
-            ft.dropdown.Option("cuda", "GPU (NVIDIA)"),
+            ft.dropdown.Option("cuda", "GPU"),
             ft.dropdown.Option("cpu", "CPU"),
         ],
-        width=130,
+        width=90,
         height=40,
     )
 
@@ -285,14 +285,14 @@ async def main(page: ft.Page):
     lang_dd = _dropdown(
         value=settings.get("lang", "auto"),
         options=[ft.dropdown.Option(k, v) for k, v in lang_map.items()],
-        width=130,
+        width=110,
         height=40,
     )
 
     beam_field = _text_field(
         value=str(settings.get("beam", 5)),
         keyboard_type=ft.KeyboardType.NUMBER,
-        width=60,
+        width=52,
         height=40,
     )
 
@@ -694,15 +694,8 @@ async def main(page: ft.Page):
     header = ft.Container(
         content=ft.Row(
             [
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.GRAPHIC_EQ, color=C_PRIMARY, size=22),
-                        ft.Text("Luminous Transcription", size=16,
-                                weight=ft.FontWeight.W_700, color=C_ON_SURFACE,
-                                style=ft.TextStyle(letter_spacing=-0.3)),
-                    ],
-                    spacing=10,
-                ),
+                ft.Icon(ft.Icons.GRAPHIC_EQ, color=C_PRIMARY, size=22),
+                ft.Container(expand=True),
                 ft.Row(
                     [
                         _icon_btn(ft.Icons.SETTINGS_OUTLINED, "Настройки"),
@@ -712,7 +705,6 @@ async def main(page: ft.Page):
                     spacing=2,
                 ),
             ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=C_WHITE,
@@ -748,56 +740,50 @@ async def main(page: ft.Page):
     download_model_btn = ft.OutlinedButton(
         content=ft.Row(
             [
-                ft.Icon(ft.Icons.DOWNLOAD_OUTLINED, size=15, color=C_PRIMARY),
-                ft.Text("Скачать модель", size=12, color=C_PRIMARY),
+                ft.Icon(ft.Icons.DOWNLOAD_OUTLINED, size=14, color=C_PRIMARY),
+                ft.Text("Скачать", size=12, color=C_PRIMARY),
             ],
-            spacing=4,
+            spacing=3,
         ),
         style=ft.ButtonStyle(
             side={CS.DEFAULT: ft.BorderSide(1, C_PRIMARY)},
             shape=ft.RoundedRectangleBorder(radius=6),
-            padding=ft.Padding(left=10, right=10, top=6, bottom=6),
+            padding=ft.Padding(left=8, right=8, top=6, bottom=6),
             overlay_color={CS.HOVERED: "#005fb20d"},
         ),
         on_click=_open_dl_dialog,
     )
 
     config_bar = ft.Container(
-        content=ft.Row(
+        content=ft.ResponsiveRow(
             [
-                ft.ResponsiveRow(
-                    [
-                        ft.Column(
-                            [_labeled("Путь к модели", models_dir_field, folder_btn, refresh_btn)],
-                            col={"xs": 12, "sm": 12, "md": 4, "lg": 3},
-                        ),
-                        ft.Column(
-                            [_labeled("Модель", model_dd, download_model_btn)],
-                            col={"xs": 12, "sm": 6, "md": 4, "lg": 3},
-                        ),
-                        ft.Column(
-                            [_labeled("Устройство", device_dd)],
-                            col={"xs": 6, "sm": 4, "md": 2, "lg": 2},
-                        ),
-                        ft.Column(
-                            [_labeled("Язык", lang_dd)],
-                            col={"xs": 6, "sm": 4, "md": 2, "lg": 2},
-                        ),
-                        ft.Column(
-                            [_labeled("Beam Size", beam_field)],
-                            col={"xs": 6, "sm": 4, "md": 2, "lg": 1},
-                        ),
-                        ft.Column(
-                            [ft.Container(height=20), model_count_lbl],
-                            col={"xs": 6, "sm": 4, "md": 2, "lg": 1},
-                        ),
-                    ],
-                    spacing=12,
-                    run_spacing=8,
-                    expand=True,
+                ft.Column(
+                    [_labeled("Путь к модели", models_dir_field, folder_btn, refresh_btn)],
+                    col={"xs": 12, "sm": 12, "md": 4, "lg": 3},
+                ),
+                ft.Column(
+                    [_labeled("Модель", model_dd, download_model_btn)],
+                    col={"xs": 12, "sm": 6, "md": 4, "lg": 3},
+                ),
+                ft.Column(
+                    [_labeled("Устройство", device_dd)],
+                    col={"xs": 6, "sm": 3, "md": 2, "lg": 2},
+                ),
+                ft.Column(
+                    [_labeled("Язык", lang_dd)],
+                    col={"xs": 6, "sm": 3, "md": 2, "lg": 2},
+                ),
+                ft.Column(
+                    [_labeled("Beam", beam_field)],
+                    col={"xs": 4, "sm": 2, "md": 1, "lg": 1},
+                ),
+                ft.Column(
+                    [ft.Container(height=20), model_count_lbl],
+                    col={"xs": 8, "sm": 4, "md": 3, "lg": 1},
                 ),
             ],
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+            run_spacing=8,
         ),
         bgcolor=C_CONTAINER,
         padding=ft.Padding(left=24, right=24, top=12, bottom=12),
