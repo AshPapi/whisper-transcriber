@@ -410,8 +410,11 @@ async def main(page: ft.Page):
             set_audio(files[0].path)
 
     async def _pick_dir(e):
+        init_dir = models_dir_field.value
+        if init_dir and not Path(init_dir).exists():
+            init_dir = str(Path.home())
         path = await dir_picker.get_directory_path(
-            initial_directory=models_dir_field.value
+            initial_directory=init_dir
         )
         if path:
             models_dir_field.value = path
