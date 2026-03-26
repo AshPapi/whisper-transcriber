@@ -37,8 +37,8 @@ jobs:
           PYTHONIOENCODING: utf-8
         shell: pwsh
         run: |
-          # Используем эхо "y", чтобы автоматически отвечать на запросы Flet
-          echo "y" | flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
+          # Передаем 'y' в команду flet через конвейер, чтобы пропустить запрос на установку SDK
+          Write-Output "y" | flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
 
       - name: Zip output
         shell: pwsh
@@ -46,7 +46,7 @@ jobs:
           if (Test-Path build\windows) {
             Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip -Force
           } else {
-            Write-Error "Build directory not found!"
+            Write-Error "Build directory not found! Check flet build logs above."
             exit 1
           }
 
