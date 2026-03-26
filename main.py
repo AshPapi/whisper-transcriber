@@ -403,7 +403,7 @@ async def main(page: ft.Page):
                     width=68, height=68,
                     border_radius=34,
                     bgcolor="#005fb214",
-                    alignment=ft.alignment.center,
+                    alignment=ft.Alignment(0, 0),
                 ),
                 drop_title,
                 drop_sub,
@@ -448,8 +448,8 @@ async def main(page: ft.Page):
             alignment=ft.MainAxisAlignment.CENTER,
         ),
         gradient=ft.LinearGradient(
-            begin=ft.alignment.top_left,
-            end=ft.alignment.bottom_right,
+            begin=ft.Alignment(-1, -1),
+            end=ft.Alignment(1, 1),
             colors=[C_PRIMARY, C_PRIMARY_DIM],
         ),
         border_radius=8,
@@ -512,7 +512,9 @@ async def main(page: ft.Page):
     file_picker = ft.FilePicker()
     dir_picker  = ft.FilePicker()
     save_picker = ft.FilePicker()
-    page.services.extend([file_picker, dir_picker, save_picker])
+    page.services.append(file_picker)
+    page.services.append(dir_picker)
+    page.services.append(save_picker)
 
     async def _pick_file(e):
         files = await file_picker.pick_files(allow_multiple=False)
