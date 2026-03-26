@@ -19,7 +19,7 @@ if hasattr(locale, "LC_MESSAGES"):
 
 import flet as ft
 
-# Если ffmpeg нет в PATH — static-ffmpeg добавит его автоматически
+
 def _ensure_ffmpeg():
     import shutil
     if shutil.which("ffmpeg"):
@@ -29,6 +29,7 @@ def _ensure_ffmpeg():
         static_ffmpeg.add_paths()
     except Exception:
         pass
+
 
 _ensure_ffmpeg()
 
@@ -41,25 +42,24 @@ WHISPER_MODELS = [
     ("medium",   "~1.5 GB"),
     ("large-v3", "~3 GB"),
 ]
+
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v"}
 SETTINGS_FILE = Path.home() / ".whisper_transcriber.json"
 
-# Палитра
-C_BG       = "#f1f5f9"
-C_HEADER   = "#0f172a"
-C_WHITE    = "#ffffff"
-C_TEXT     = "#0f172a"
-C_MUTED    = "#64748b"
-C_LIGHT    = "#94a3b8"
-C_BORDER   = "#e2e8f0"
-C_INPUT    = "#f1f5f9"
-C_PRIMARY  = "#3b82f6"
-C_PRI2     = "#2563eb"
-C_PRI3     = "#1d4ed8"
-C_DANGER   = "#fef2f2"
-C_DANGER_T = "#dc2626"
-C_DROP_BG  = "#eff6ff"
-C_DROP_BD  = "#93c5fd"
+# ── Luminous Workspace palette ─────────────────────────────────────────────
+C_BG                = "#f9f9f9"
+C_CONTAINER         = "#eceeee"
+C_CONTAINER_LOW     = "#f3f4f4"
+C_CONTAINER_HIGH    = "#e6e9e9"
+C_CONTAINER_HIGHEST = "#dfe3e4"
+C_WHITE             = "#ffffff"
+C_PRIMARY           = "#005fb2"
+C_PRIMARY_DIM       = "#00539d"
+C_ON_PRIMARY        = "#f8f8ff"
+C_ON_SURFACE        = "#2f3334"
+C_ON_SURFACE_VAR    = "#5b6061"
+C_SECONDARY         = "#50616d"
+C_OUTLINE_VAR       = "#afb3b3"
 CS = ft.ControlState
 
 
@@ -94,6 +94,16 @@ def scan_models(models_dir: str) -> list:
     for item in sorted(p.glob("*.bin")):
         found.append((item.stem, str(item)))
     return found
+
+
+def _default_device() -> str:
+    try:
+        import ctranslate2
+        if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
 
 
 class TranscribeWorker(threading.Thread):
@@ -174,27 +184,27 @@ class TranscribeWorker(threading.Thread):
 
 
 async def main(page: ft.Page):
-    page.title = "Whisper Transcriber"
+    page.title = "Luminous Transcription"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 0
     page.bgcolor = C_BG
-    page.window.min_width = 760
-    page.window.min_height = 580
-    page.window.width = 960
-    page.window.height = 720
+    page.window.min_width = 900
+    page.window.min_height = 620
+    page.window.width = 1100
+    page.window.height = 760
 
     settings = load_settings()
     state = {"worker": None, "audio_path": None}
 
-    # ── Пульсирующая точка ────────────────────────────────────────────────
+    # ── Pulse dot ────────────────────────────────────────────────────────
     pulse_timer_ref = [None]
     pulse_on = [True]
 
-    pulse_dot = ft.Text("●", size=10, color="#475569")
+    pulse_dot = ft.Container(width=8, height=8, border_radius=4, bgcolor="#5da2ff")
 
     def _pulse_tick():
         pulse_on[0] = not pulse_on[0]
-        pulse_dot.color = "#60a5fa" if pulse_on[0] else "#3b82f6"
+        pulse_dot.bgcolor = "#5da2ff" if pulse_on[0] else C_PRIMARY
         page.update()
         t = threading.Timer(0.65, _pulse_tick)
         t.daemon = True
@@ -202,7 +212,7 @@ async def main(page: ft.Page):
         t.start()
 
     def pulse_start():
-        pulse_dot.color = "#60a5fa"
+        pulse_dot.bgcolor = "#5da2ff"
         t = threading.Timer(0.65, _pulse_tick)
         t.daemon = True
         pulse_timer_ref[0] = t
@@ -212,35 +222,102 @@ async def main(page: ft.Page):
         if pulse_timer_ref[0]:
             pulse_timer_ref[0].cancel()
             pulse_timer_ref[0] = None
-        pulse_dot.color = "#475569"
+        pulse_dot.bgcolor = "#4ade80"
 
-    # ── Контролы ──────────────────────────────────────────────────────────
-    status_lbl      = ft.Text("готов", size=12, color="#94a3b8")
-    stats_lbl       = ft.Text("", size=12, color="#94a3b8")
-    model_count_lbl = ft.Text("", size=12, color=C_MUTED)
+    # ── Status labels ────────────────────────────────────────────────────
+    status_lbl    = ft.Text("готов", size=11, color=C_ON_SURFACE_VAR)
+    stats_lbl     = ft.Text("", size=11, color=C_ON_SURFACE_VAR)
+    model_count_lbl = ft.Text("", size=11, color=C_ON_SURFACE_VAR)
+    file_name_lbl = ft.Text("—", size=13, color=C_ON_SURFACE, weight=ft.FontWeight.W_500)
 
-    # ── Диалог скачивания модели ───────────────────────────────────────────
+    # ── Field helpers ────────────────────────────────────────────────────
+    def _text_field(**kw):
+        return ft.TextField(
+            text_style=ft.TextStyle(color=C_ON_SURFACE, size=13),
+            hint_style=ft.TextStyle(color=C_OUTLINE_VAR, size=13),
+            bgcolor=C_CONTAINER_HIGHEST,
+            border=ft.InputBorder.UNDERLINE,
+            border_color=C_OUTLINE_VAR,
+            focused_border_color=C_PRIMARY,
+            border_radius=ft.BorderRadius(top_left=6, top_right=6, bottom_left=0, bottom_right=0),
+            content_padding=ft.Padding(left=10, right=10, top=8, bottom=8),
+            cursor_color=C_PRIMARY,
+            **kw,
+        )
+
+    def _dropdown(**kw):
+        return ft.Dropdown(
+            text_style=ft.TextStyle(color=C_ON_SURFACE, size=13),
+            hint_style=ft.TextStyle(color=C_OUTLINE_VAR, size=13),
+            bgcolor=C_CONTAINER_HIGHEST,
+            border_color=C_OUTLINE_VAR,
+            focused_border_color=C_PRIMARY,
+            border_radius=ft.BorderRadius(top_left=6, top_right=6, bottom_left=0, bottom_right=0),
+            content_padding=ft.Padding(left=10, right=4, top=0, bottom=0),
+            **kw,
+        )
+
+    # ── Config controls ───────────────────────────────────────────────────
+    models_dir_field = _text_field(
+        value=settings.get("models_dir", DEFAULT_MODELS_DIR),
+        hint_text="путь к папке моделей",
+        width=190,
+        height=40,
+    )
+
+    model_dd = _dropdown(hint_text="выберите модель", width=160, height=40)
+
+    device_dd = _dropdown(
+        value=settings.get("device", _default_device()),
+        options=[
+            ft.dropdown.Option("cuda", "GPU (NVIDIA)"),
+            ft.dropdown.Option("cpu", "CPU"),
+        ],
+        width=130,
+        height=40,
+    )
+
+    lang_map = {
+        "auto": "Авто", "ru": "Русский", "en": "English",
+        "de": "Deutsch", "fr": "Français", "es": "Español",
+        "it": "Italiano", "ja": "日本語", "zh": "中文", "uk": "Українська",
+    }
+    lang_dd = _dropdown(
+        value=settings.get("lang", "auto"),
+        options=[ft.dropdown.Option(k, v) for k, v in lang_map.items()],
+        width=130,
+        height=40,
+    )
+
+    beam_field = _text_field(
+        value=str(settings.get("beam", 5)),
+        keyboard_type=ft.KeyboardType.NUMBER,
+        width=60,
+        height=40,
+    )
+
+    # ── Download dialog ───────────────────────────────────────────────────
     dl_model_dd = ft.Dropdown(
         value="small",
         options=[ft.dropdown.Option(key=m, text=f"{m}  ({sz})") for m, sz in WHISPER_MODELS],
-        text_style=ft.TextStyle(color=C_TEXT, size=13),
-        bgcolor=C_INPUT,
-        border_color="transparent",
+        text_style=ft.TextStyle(color=C_ON_SURFACE, size=13),
+        bgcolor=C_CONTAINER_HIGHEST,
+        border_color=C_OUTLINE_VAR,
         focused_border_color=C_PRIMARY,
         border_radius=8,
         width=220,
     )
-    dl_status_lbl = ft.Text("", size=12, color=C_MUTED)
-    dl_progress = ft.ProgressBar(width=320, visible=False, color=C_PRIMARY, bgcolor=C_BORDER)
-    dl_btn_start = ft.TextButton("Скачать")
-    dl_btn_close = ft.TextButton("Закрыть")
+    dl_status_lbl = ft.Text("", size=12, color=C_ON_SURFACE_VAR)
+    dl_progress   = ft.ProgressBar(width=320, visible=False, color=C_PRIMARY, bgcolor=C_CONTAINER_HIGH)
+    dl_btn_start  = ft.TextButton("Скачать")
+    dl_btn_close  = ft.TextButton("Закрыть")
 
     dl_dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("Скачать модель Whisper", size=15, weight=ft.FontWeight.W_600),
         content=ft.Column(
             [
-                ft.Text("Выберите размер модели:", size=13, color=C_MUTED),
+                ft.Text("Выберите размер модели:", size=13, color=C_ON_SURFACE_VAR),
                 dl_model_dd,
                 dl_progress,
                 dl_status_lbl,
@@ -258,32 +335,32 @@ async def main(page: ft.Page):
             from huggingface_hub import snapshot_download
             repo_id = f"Systran/faster-whisper-{model_name}"
             local_dir = str(Path(dest_dir) / f"faster-whisper-{model_name}")
-            page.run_thread(lambda: _dl_set_status(f"скачивание {model_name}…", indeterminate=True))
+            dl_status_lbl.value = f"скачивание {model_name}…"
+            dl_progress.visible = True
+            dl_btn_start.disabled = True
+            page.update()
             snapshot_download(repo_id=repo_id, local_dir=local_dir)
-            page.run_thread(lambda: _dl_done(model_name))
+            dl_status_lbl.value = f"✓ {model_name} скачана"
+            dl_status_lbl.color = "#16a34a"
+            dl_progress.visible = False
+            dl_btn_start.disabled = False
+            page.update()
+            _scan_models()
         except Exception as ex:
-            page.run_thread(lambda: _dl_set_status(f"ошибка: {ex}", indeterminate=False))
-
-    def _dl_set_status(text: str, indeterminate: bool):
-        dl_status_lbl.value = text
-        dl_progress.visible = indeterminate
-        dl_btn_start.disabled = indeterminate
-        page.update()
-
-    def _dl_done(model_name: str):
-        dl_status_lbl.value = f"✓ {model_name} скачана"
-        dl_status_lbl.color = "#4ade80"
-        dl_progress.visible = False
-        dl_btn_start.disabled = False
-        page.update()
-        _scan_models()
+            dl_status_lbl.value = f"ошибка: {ex}"
+            dl_progress.visible = False
+            dl_btn_start.disabled = False
+            page.update()
 
     def _on_dl_start(e):
-        model_name = dl_model_dd.value
         dest_dir = models_dir_field.value or DEFAULT_MODELS_DIR
         Path(dest_dir).mkdir(parents=True, exist_ok=True)
-        dl_status_lbl.color = C_MUTED
-        threading.Thread(target=_do_download, args=(model_name, dest_dir), daemon=True).start()
+        dl_status_lbl.color = C_ON_SURFACE_VAR
+        threading.Thread(
+            target=_do_download,
+            args=(dl_model_dd.value, dest_dir),
+            daemon=True,
+        ).start()
 
     def _on_dl_close(e):
         if not dl_btn_start.disabled:
@@ -295,208 +372,143 @@ async def main(page: ft.Page):
 
     def _open_dl_dialog(e):
         dl_status_lbl.value = ""
-        dl_status_lbl.color = C_MUTED
+        dl_status_lbl.color = C_ON_SURFACE_VAR
         dl_progress.visible = False
         dl_btn_start.disabled = False
         dl_dialog.open = True
         page.update()
 
-    download_model_btn = ft.TextButton(
-        "↓ Скачать модель",
-        style=ft.ButtonStyle(
-            color={CS.DEFAULT: C_PRIMARY, CS.HOVERED: C_PRI2},
-        ),
-        on_click=_open_dl_dialog,
-    )
-
-    progress_bar = ft.ProgressBar(
-        width=80, height=3,
-        color="#60a5fa", bgcolor="#334155",
-        visible=False,
-    )
-
-    output_field = ft.TextField(
-        multiline=True,
-        read_only=True,
-        expand=True,
-        min_lines=14,
-        hint_text="результат транскрибации появится здесь\n\n[мм:сс → мм:сс]  текст",
-        hint_style=ft.TextStyle(color=C_LIGHT, size=13),
-        text_style=ft.TextStyle(color=C_TEXT, size=14, height=1.7),
-        bgcolor=C_WHITE,
-        border=ft.InputBorder.NONE,
-        border_radius=12,
-        content_padding=ft.Padding(left=28, right=28, top=24, bottom=24),
-        cursor_color=C_PRIMARY,
-    )
-
-    # ── Настройки ─────────────────────────────────────────────────────────
-    input_pad = ft.Padding(left=10, right=10, top=5, bottom=5)
-    dd_pad    = ft.Padding(left=10, right=10, top=0, bottom=0)
-
-    models_dir_field = ft.TextField(
-        value=settings.get("models_dir", DEFAULT_MODELS_DIR),
-        hint_text="папка моделей",
-        hint_style=ft.TextStyle(color=C_LIGHT, size=12),
-        text_style=ft.TextStyle(color=C_TEXT, size=12),
-        bgcolor=C_INPUT,
-        border=ft.InputBorder.NONE,
-        focused_border_color=C_PRIMARY,
-        border_radius=8,
-        content_padding=input_pad,
-        height=34,
-        width=180,
-        cursor_color=C_PRIMARY,
-    )
-
-    model_dd = ft.Dropdown(
-        hint_text="модель",
-        text_style=ft.TextStyle(color=C_TEXT, size=12),
-        hint_style=ft.TextStyle(color=C_LIGHT, size=12),
-        bgcolor=C_INPUT,
-        border_color="transparent",
-        focused_border_color=C_PRIMARY,
-        border_radius=8,
-        content_padding=dd_pad,
-        width=140,
-        height=34,
-    )
-
-    device_dd = ft.Dropdown(
-        value=settings.get("device", "cuda"),
-        options=[ft.dropdown.Option("cuda"), ft.dropdown.Option("cpu")],
-        text_style=ft.TextStyle(color=C_TEXT, size=12),
-        bgcolor=C_INPUT,
-        border_color="transparent",
-        focused_border_color=C_PRIMARY,
-        border_radius=8,
-        content_padding=dd_pad,
-        width=100,
-        height=34,
-    )
-
-    lang_dd = ft.Dropdown(
-        value=settings.get("lang", "auto"),
-        options=[ft.dropdown.Option(l) for l in
-                 ["auto", "ru", "en", "de", "fr", "es", "it", "ja", "zh", "uk"]],
-        text_style=ft.TextStyle(color=C_TEXT, size=12),
-        bgcolor=C_INPUT,
-        border_color="transparent",
-        focused_border_color=C_PRIMARY,
-        border_radius=8,
-        content_padding=dd_pad,
-        width=115,
-        height=34,
-    )
-
-    beam_field = ft.TextField(
-        value=str(settings.get("beam", 5)),
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_style=ft.TextStyle(color=C_TEXT, size=12),
-        bgcolor=C_INPUT,
-        border=ft.InputBorder.NONE,
-        focused_border_color=C_PRIMARY,
-        border_radius=8,
-        content_padding=input_pad,
-        height=34,
-        width=44,
-        cursor_color=C_PRIMARY,
-    )
-
     # ── Drop zone ─────────────────────────────────────────────────────────
-    drop_icon  = ft.Text("↑", size=26, color=C_DROP_BD)
-    drop_title = ft.Text("ПЕРЕТАЩИТЕ ФАЙЛ СЮДА", size=12,
-                         weight=ft.FontWeight.W_700, color=C_MUTED)
-    drop_sub   = ft.Text("или нажмите для выбора · аудио и видео",
-                         size=11, color=C_LIGHT)
+    drop_icon_ctrl = ft.Icon(ft.Icons.UPLOAD_FILE_OUTLINED, size=36, color=C_PRIMARY)
+    drop_title     = ft.Text("Перетащите файлы сюда", size=17,
+                             weight=ft.FontWeight.W_600, color=C_ON_SURFACE)
+    drop_sub       = ft.Text("Поддерживаются форматы MP3, WAV, MP4, MKV",
+                             size=12, color=C_ON_SURFACE_VAR)
+
+    pick_file_btn = ft.OutlinedButton(
+        "Выбрать файл",
+        style=ft.ButtonStyle(
+            color={CS.DEFAULT: C_PRIMARY, CS.HOVERED: C_PRIMARY_DIM},
+            side={CS.DEFAULT: ft.BorderSide(1, C_PRIMARY)},
+            shape=ft.RoundedRectangleBorder(radius=8),
+            padding=ft.Padding(left=20, right=20, top=10, bottom=10),
+        ),
+    )
 
     drop_zone = ft.Container(
         content=ft.Column(
-            [drop_icon, drop_title, drop_sub],
+            [
+                ft.Container(
+                    content=drop_icon_ctrl,
+                    width=68, height=68,
+                    border_radius=34,
+                    bgcolor="#005fb214",
+                    alignment=ft.alignment.center,
+                ),
+                drop_title,
+                drop_sub,
+                pick_file_btn,
+            ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             alignment=ft.MainAxisAlignment.CENTER,
-            spacing=6,
+            spacing=10,
         ),
-        height=120,
-        border_radius=12,
-        bgcolor=C_DROP_BG,
-        border=ft.Border.all(2, C_DROP_BD),
+        border_radius=16,
+        bgcolor=C_CONTAINER_LOW,
+        border=ft.Border.all(1, "#d0d4d4"),
+        expand=True,
+        ink=True,
+        ink_color=C_CONTAINER_HIGH,
     )
-
-    def _drop_hover(e):
-        if e.data == "true":
-            drop_zone.bgcolor = "#dbeafe"
-            drop_zone.border = ft.Border.all(2, "#60a5fa")
-        else:
-            drop_zone.bgcolor = C_DROP_BG
-            drop_zone.border = ft.Border.all(2, C_DROP_BD)
-        page.update()
-
-    drop_zone.on_hover = _drop_hover
 
     def set_audio(path: str):
         state["audio_path"] = path
         name = Path(path).name
-        drop_icon.value = "♪"
-        drop_icon.color = C_PRIMARY
+        drop_icon_ctrl.name = ft.Icons.AUDIO_FILE_OUTLINED
         drop_title.value = name
-        drop_title.color = C_TEXT
-        drop_sub.value = "нажмите чтобы сменить"
-        drop_sub.color = C_MUTED
-        drop_zone.bgcolor = "#dbeafe"
-        drop_zone.border = ft.Border.all(2, C_PRIMARY)
-        _set_status(f"файл: {name}")
+        drop_sub.value = "нажмите чтобы сменить файл"
+        drop_zone.bgcolor = "#eef4fc"
+        drop_zone.border = ft.Border.all(1, C_PRIMARY)
+        file_name_lbl.value = name
+        _set_status("файл выбран")
         _update_run_btn()
         page.update()
 
-    # ── Кнопки ────────────────────────────────────────────────────────────
-    ghost_style = ft.ButtonStyle(
-        color={CS.DEFAULT: C_MUTED, CS.HOVERED: C_TEXT, CS.DISABLED: "#cbd5e1"},
-        bgcolor={CS.HOVERED: "#e2e8f0"},
-        shape=ft.RoundedRectangleBorder(radius=8),
-        padding=ft.Padding(left=14, right=14, top=8, bottom=8),
+    # ── Run / Stop buttons ────────────────────────────────────────────────
+    run_btn_text = ft.Text(
+        "Транскрибировать", size=14, weight=ft.FontWeight.W_700, color=C_ON_PRIMARY
     )
-
-    tb_style = ft.ButtonStyle(
-        color={CS.DEFAULT: C_MUTED, CS.HOVERED: C_TEXT},
-        bgcolor={CS.HOVERED: "#e2e8f0"},
-        shape=ft.RoundedRectangleBorder(radius=8),
-        padding=ft.Padding(left=10, right=10, top=5, bottom=5),
-    )
-
-    run_btn = ft.Button(
-        content="Транскрибировать",
-        disabled=True,
-        style=ft.ButtonStyle(
-            bgcolor={CS.DEFAULT: C_PRIMARY, CS.HOVERED: C_PRI2,
-                     CS.DISABLED: "#93c5fd", CS.PRESSED: C_PRI3},
-            color={CS.DEFAULT: "#ffffff", CS.DISABLED: "#dbeafe"},
-            shape=ft.RoundedRectangleBorder(radius=8),
-            padding=ft.Padding(left=24, right=24, top=10, bottom=10),
+    run_btn_container = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.PLAY_ARROW, color=C_ON_PRIMARY, size=18),
+                run_btn_text,
+            ],
+            spacing=8,
+            alignment=ft.MainAxisAlignment.CENTER,
         ),
-        on_click=lambda _: _on_run(),
-    )
-
-    stop_btn = ft.Button(
-        content="Стоп",
-        disabled=True,
-        style=ft.ButtonStyle(
-            bgcolor={CS.DEFAULT: C_DANGER, CS.HOVERED: "#fee2e2",
-                     CS.DISABLED: "#fff5f5"},
-            color={CS.DEFAULT: C_DANGER_T, CS.HOVERED: "#b91c1c",
-                   CS.DISABLED: "#fca5a5"},
-            shape=ft.RoundedRectangleBorder(radius=8),
-            padding=ft.Padding(left=18, right=18, top=10, bottom=10),
+        gradient=ft.LinearGradient(
+            begin=ft.alignment.top_left,
+            end=ft.alignment.bottom_right,
+            colors=[C_PRIMARY, C_PRIMARY_DIM],
         ),
-        on_click=lambda _: _on_stop(),
+        border_radius=8,
+        padding=ft.Padding(left=24, right=24, top=14, bottom=14),
+        expand=True,
+        ink=True,
+        ink_color="#ffffff22",
+        opacity=0.45,
     )
 
-    copy_btn = ft.Button(content="Копировать", disabled=True,
-                         style=ghost_style, on_click=lambda _: _on_copy())
-    save_btn = ft.Button(content="Сохранить .txt", disabled=True,
-                         style=ghost_style)
+    stop_btn_container = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.STOP, color=C_SECONDARY, size=18),
+                ft.Text("Стоп", size=14, weight=ft.FontWeight.W_700, color=C_SECONDARY),
+            ],
+            spacing=8,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        bgcolor=C_CONTAINER_HIGHEST,
+        border_radius=8,
+        padding=ft.Padding(left=24, right=24, top=14, bottom=14),
+        ink=True,
+        ink_color=C_CONTAINER_HIGH,
+        opacity=0.45,
+    )
 
-    # ── File pickers (async API) ──────────────────────────────────────────
+    # ── Output area ───────────────────────────────────────────────────────
+    output_field = ft.TextField(
+        multiline=True,
+        read_only=True,
+        expand=True,
+        min_lines=10,
+        hint_text="результат транскрипции появится здесь\n\n[мм:сс → мм:сс]  текст сегмента",
+        hint_style=ft.TextStyle(color=C_OUTLINE_VAR, size=13),
+        text_style=ft.TextStyle(color=C_ON_SURFACE, size=14, height=1.75),
+        bgcolor=C_WHITE,
+        border=ft.InputBorder.NONE,
+        content_padding=ft.Padding(left=32, right=32, top=24, bottom=24),
+        cursor_color=C_PRIMARY,
+    )
+
+    copy_btn = ft.IconButton(
+        icon=ft.Icons.CONTENT_COPY_OUTLINED,
+        icon_color=C_SECONDARY,
+        icon_size=18,
+        tooltip="Копировать",
+        disabled=True,
+        on_click=lambda _: _on_copy(),
+    )
+    save_btn = ft.IconButton(
+        icon=ft.Icons.DOWNLOAD_OUTLINED,
+        icon_color=C_SECONDARY,
+        icon_size=18,
+        tooltip="Сохранить .txt",
+        disabled=True,
+    )
+
+    # ── File pickers ──────────────────────────────────────────────────────
     file_picker = ft.FilePicker()
     dir_picker  = ft.FilePicker()
     save_picker = ft.FilePicker()
@@ -511,9 +523,7 @@ async def main(page: ft.Page):
         init_dir = models_dir_field.value
         if init_dir and not Path(init_dir).exists():
             init_dir = str(Path.home())
-        path = await dir_picker.get_directory_path(
-            initial_directory=init_dir
-        )
+        path = await dir_picker.get_directory_path(initial_directory=init_dir)
         if path:
             models_dir_field.value = path
             page.update()
@@ -526,32 +536,39 @@ async def main(page: ft.Page):
         if path:
             p = path if path.endswith(".txt") else path + ".txt"
             Path(p).write_text(output_field.value or "", encoding="utf-8")
-            _set_status(f"сохранено: {Path(p).name}", "#4ade80")
+            _set_status(f"сохранено: {Path(p).name}")
 
-    drop_zone.on_click = _pick_file
-    save_btn.on_click  = _on_save
+    drop_zone.on_click    = _pick_file
+    pick_file_btn.on_click = _pick_file
+    save_btn.on_click     = _on_save
 
-    # ── Логика ────────────────────────────────────────────────────────────
-    def _set_status(text: str, color: str = "#94a3b8"):
+    # ── Logic ─────────────────────────────────────────────────────────────
+    def _set_status(text: str, color: str = C_ON_SURFACE_VAR):
         status_lbl.value = text
         status_lbl.color = color
         page.update()
 
     def _update_run_btn():
-        run_btn.disabled = not (
+        enabled = (
             model_dd.value is not None
             and state["audio_path"] is not None
             and state["worker"] is None
         )
+        run_btn_container.opacity = 1.0 if enabled else 0.45
+        run_btn_container.on_click = (lambda _: _on_run()) if enabled else None
+        busy = state["worker"] is not None
+        stop_btn_container.opacity = 1.0 if busy else 0.45
+        stop_btn_container.on_click = (lambda _: _on_stop()) if busy else None
 
     def _scan_models():
         found = scan_models(models_dir_field.value or DEFAULT_MODELS_DIR)
-        model_dd.options = [ft.dropdown.Option(key=path, text=name) for name, path in found]
+        model_dd.options = [ft.dropdown.Option(key=p, text=n) for n, p in found]
         if found:
             paths = [p for _, p in found]
             if model_dd.value not in paths:
                 model_dd.value = found[0][1]
-            model_count_lbl.value = f"{len(found)} {'модель' if len(found)==1 else 'моделей'}"
+            cnt = len(found)
+            model_count_lbl.value = f"{cnt} {'модель' if cnt == 1 else 'моделей'}"
         else:
             model_dd.value = None
             model_count_lbl.value = "моделей нет"
@@ -569,13 +586,10 @@ async def main(page: ft.Page):
         })
         output_field.value = ""
         stats_lbl.value = ""
-        progress_bar.visible = True
-        run_btn.disabled = True
-        stop_btn.disabled = False
         copy_btn.disabled = True
         save_btn.disabled = True
         pulse_start()
-        _set_status("запуск...", "#60a5fa")
+        _set_status("запуск...", C_PRIMARY)
 
         w = TranscribeWorker(
             model_path=model_dd.value,
@@ -583,11 +597,12 @@ async def main(page: ft.Page):
             language=lang_dd.value or "auto",
             beam_size=beam_field.value or "5",
             device=device_dd.value or "cpu",
-            on_progress=lambda msg: _set_status(msg, "#60a5fa"),
+            on_progress=lambda msg: _set_status(msg, C_PRIMARY),
             on_finished=_on_finished,
             on_error=_on_error,
         )
         state["worker"] = w
+        _update_run_btn()
         w.start()
 
     def _on_stop():
@@ -595,7 +610,7 @@ async def main(page: ft.Page):
             state["worker"].stop()
             state["worker"] = None
         _reset_ui()
-        _set_status("остановлено", "#fbbf24")
+        _set_status("остановлено", "#f59e0b")
 
     def _on_finished(text: str, duration: float):
         output_field.value = text
@@ -605,17 +620,15 @@ async def main(page: ft.Page):
         save_btn.disabled = False
         state["worker"] = None
         _reset_ui()
-        _set_status("готово", "#4ade80")
+        _set_status("готово ✓", "#16a34a")
 
     def _on_error(msg: str):
         output_field.value = f"ошибка:\n{msg}\n\nподробности в error.log"
         state["worker"] = None
         _reset_ui()
-        _set_status(f"ошибка: {msg}", "#f87171")
+        _set_status("ошибка", "#dc2626")
 
     def _reset_ui():
-        progress_bar.visible = False
-        stop_btn.disabled = True
         pulse_stop()
         _update_run_btn()
         page.update()
@@ -624,109 +637,283 @@ async def main(page: ft.Page):
         if output_field.value:
             page.set_clipboard(output_field.value)
             old_v, old_c = status_lbl.value, status_lbl.color
-            _set_status("скопировано", "#4ade80")
+            _set_status("скопировано ✓", "#16a34a")
             def _restore():
                 import time; time.sleep(2)
                 _set_status(old_v, old_c)
             threading.Thread(target=_restore, daemon=True).start()
 
-    # ── Сборка UI ─────────────────────────────────────────────────────────
-    def _divider():
-        return ft.Container(width=1, height=44, bgcolor=C_BORDER,
-                            margin=ft.Margin(left=4, right=4, top=0, bottom=0))
+    # ── UI Assembly ────────────────────────────────────────────────────────
 
-    def _labeled(label: str, *controls):
-        return ft.Column(
-            [
-                ft.Text(label, size=10, color=C_LIGHT, weight=ft.FontWeight.W_500),
-                ft.Row(list(controls), spacing=4,
-                       vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ],
-            spacing=3,
-            horizontal_alignment=ft.CrossAxisAlignment.START,
+    def _icon_btn(icon, tooltip=""):
+        return ft.IconButton(
+            icon=icon,
+            icon_color=C_SECONDARY,
+            icon_size=20,
+            tooltip=tooltip,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=8),
+                overlay_color={CS.HOVERED: C_CONTAINER_LOW},
+            ),
         )
 
-    title_bar = ft.Container(
+    def _labeled(label, *controls):
+        return ft.Column(
+            [
+                ft.Text(label.upper(), size=10, color=C_ON_SURFACE_VAR,
+                        weight=ft.FontWeight.W_500, letter_spacing=0.8),
+                ft.Row(list(controls), spacing=6,
+                       vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ],
+            spacing=4,
+        )
+
+    def _vdivider():
+        return ft.Container(
+            width=1, height=42, bgcolor="#d0d4d4",
+            margin=ft.Margin(left=4, right=4, top=0, bottom=0),
+        )
+
+    def _info_row(icon, label, value_ctrl):
+        return ft.Row(
+            [
+                ft.Icon(icon, color=C_SECONDARY, size=20),
+                ft.Column(
+                    [ft.Text(label, size=10, color=C_ON_SURFACE_VAR), value_ctrl],
+                    spacing=1,
+                ),
+            ],
+            spacing=14,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+
+    # ── Header ────────────────────────────────────────────────────────────
+    header = ft.Container(
         content=ft.Row(
             [
-                ft.Text("Whisper Transcriber", size=16,
-                         weight=ft.FontWeight.W_700, color="#ffffff"),
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.GRAPHIC_EQ, color=C_PRIMARY, size=22),
+                        ft.Text("Luminous Transcription", size=16,
+                                weight=ft.FontWeight.W_700, color=C_ON_SURFACE,
+                                letter_spacing=-0.3),
+                    ],
+                    spacing=10,
+                ),
+                ft.Row(
+                    [
+                        _icon_btn(ft.Icons.SETTINGS_OUTLINED, "Настройки"),
+                        _icon_btn(ft.Icons.HELP_OUTLINE, "Помощь"),
+                        _icon_btn(ft.Icons.ACCOUNT_CIRCLE_OUTLINED, "Профиль"),
+                    ],
+                    spacing=2,
+                ),
             ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        bgcolor=C_HEADER,
-        padding=ft.Padding(left=24, right=24, top=0, bottom=0),
-        height=44,
+        bgcolor=C_WHITE,
+        padding=ft.Padding(left=24, right=16, top=0, bottom=0),
+        height=52,
+        border=ft.Border(bottom=ft.BorderSide(1, "#e8eaea")),
+        shadow=ft.BoxShadow(blur_radius=8, color="#0000000a", offset=ft.Offset(0, 2)),
     )
 
-    settings_bar = ft.Container(
+    # ── Config bar ────────────────────────────────────────────────────────
+    folder_btn = ft.IconButton(
+        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+        icon_color=C_PRIMARY,
+        icon_size=20,
+        tooltip="Выбрать папку",
+        style=ft.ButtonStyle(
+            bgcolor={CS.DEFAULT: C_CONTAINER_HIGHEST, CS.HOVERED: C_CONTAINER_HIGH},
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+        on_click=_pick_dir,
+    )
+    refresh_btn = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        icon_color=C_SECONDARY,
+        icon_size=18,
+        tooltip="Обновить список моделей",
+        style=ft.ButtonStyle(
+            bgcolor={CS.DEFAULT: C_CONTAINER_HIGHEST, CS.HOVERED: C_CONTAINER_HIGH},
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+        on_click=lambda _: _scan_models(),
+    )
+    download_model_btn = ft.OutlinedButton(
         content=ft.Row(
             [
-                _labeled(
-                    "путь к модели",
-                    models_dir_field,
-                    ft.Button(content="···", style=tb_style, on_click=_pick_dir),
-                    ft.Button(content="↺", style=tb_style, on_click=lambda _: _scan_models()),
-                ),
-                _divider(),
-                _labeled("модель", model_dd),
-                _labeled("устройство", device_dd),
-                _labeled("язык", lang_dd),
-                _divider(),
-                _labeled("beam", beam_field),
-                _divider(),
+                ft.Icon(ft.Icons.DOWNLOAD_OUTLINED, size=15, color=C_PRIMARY),
+                ft.Text("Скачать модель", size=12, color=C_PRIMARY),
+            ],
+            spacing=4,
+        ),
+        style=ft.ButtonStyle(
+            side={CS.DEFAULT: ft.BorderSide(1, C_PRIMARY)},
+            shape=ft.RoundedRectangleBorder(radius=6),
+            padding=ft.Padding(left=10, right=10, top=6, bottom=6),
+            overlay_color={CS.HOVERED: "#005fb20d"},
+        ),
+        on_click=_open_dl_dialog,
+    )
+
+    config_bar = ft.Container(
+        content=ft.Row(
+            [
+                _labeled("Путь к модели", models_dir_field, folder_btn, refresh_btn),
+                _vdivider(),
+                _labeled("Модель", model_dd, download_model_btn),
+                _vdivider(),
+                _labeled("Устройство", device_dd),
+                _labeled("Язык", lang_dd),
+                _vdivider(),
+                _labeled("Beam Size", beam_field),
+                ft.Container(expand=True),
                 model_count_lbl,
-                download_model_btn,
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=12,
         ),
+        bgcolor=C_CONTAINER,
+        padding=ft.Padding(left=24, right=24, top=12, bottom=12),
+        border=ft.Border(bottom=ft.BorderSide(1, "#d8dbdb")),
+    )
+
+    # ── File info card ────────────────────────────────────────────────────
+    file_info_card = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text("ИНФОРМАЦИЯ О ФАЙЛЕ", size=10, color=C_ON_SURFACE_VAR,
+                        weight=ft.FontWeight.W_600, letter_spacing=1.2),
+                ft.Container(height=4),
+                _info_row(ft.Icons.DESCRIPTION_OUTLINED, "Имя файла", file_name_lbl),
+                _info_row(ft.Icons.SCHEDULE_OUTLINED, "Статус", status_lbl),
+                ft.Container(expand=True),
+                ft.Divider(height=1, color="#ebebeb"),
+                ft.Row(
+                    [
+                        ft.Text("Статус системы", size=11, color=C_ON_SURFACE_VAR),
+                        ft.Row(
+                            [
+                                pulse_dot,
+                                ft.Text("Готов", size=11, color=C_PRIMARY,
+                                        weight=ft.FontWeight.W_500),
+                            ],
+                            spacing=6,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=14,
+            expand=True,
+        ),
         bgcolor=C_WHITE,
-        padding=ft.Padding(left=24, right=24, top=8, bottom=8),
-        height=70,
-        border=ft.Border.only(bottom=ft.BorderSide(1, C_BORDER)),
-    )
-
-    action_row = ft.Row(
-        [run_btn, stop_btn, ft.Container(expand=True), copy_btn, save_btn],
-        spacing=8,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-    content_area = ft.Container(
-        content=ft.Column([drop_zone, action_row], spacing=14),
-        padding=ft.Padding(left=20, right=20, top=16, bottom=8),
-        bgcolor=C_BG,
-    )
-
-    output_container = ft.Container(
-        content=output_field,
+        border_radius=12,
+        padding=24,
         expand=True,
-        margin=ft.Margin(left=20, right=20, top=0, bottom=12),
+        shadow=ft.BoxShadow(
+            blur_radius=20,
+            color="#0000000f",
+            offset=ft.Offset(0, 4),
+        ),
     )
 
-    statusbar = ft.Container(
+    # ── Middle section (drop zone + file info) ────────────────────────────
+    middle_section = ft.Container(
         content=ft.Row(
-            [pulse_dot, status_lbl, progress_bar,
-             ft.Container(expand=True), stats_lbl],
-            spacing=8,
+            [
+                ft.Column(
+                    [
+                        drop_zone,
+                        ft.Row([run_btn_container, stop_btn_container], spacing=12),
+                    ],
+                    spacing=14,
+                    expand=2,
+                ),
+                ft.Column(
+                    [file_info_card],
+                    expand=1,
+                ),
+            ],
+            spacing=20,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        ),
+        padding=ft.Padding(left=24, right=24, top=20, bottom=0),
+        height=300,
+    )
+
+    # ── Transcription section ─────────────────────────────────────────────
+    output_section = ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Text("Результат транскрипции", size=14,
+                                    weight=ft.FontWeight.W_700, color=C_ON_SURFACE),
+                            ft.Row([copy_btn, save_btn], spacing=0),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    bgcolor=C_CONTAINER_LOW,
+                    padding=ft.Padding(left=24, right=12, top=10, bottom=10),
+                    border=ft.Border(bottom=ft.BorderSide(1, "#ebebeb")),
+                ),
+                output_field,
+            ],
+            spacing=0,
+            expand=True,
+        ),
+        bgcolor=C_WHITE,
+        border_radius=ft.BorderRadius(top_left=12, top_right=12, bottom_left=0, bottom_right=0),
+        margin=ft.Margin(left=24, right=24, top=16, bottom=0),
+        expand=True,
+        shadow=ft.BoxShadow(
+            blur_radius=20,
+            color="#0000000f",
+            offset=ft.Offset(0, -2),
+        ),
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+    )
+
+    # ── Footer ────────────────────────────────────────────────────────────
+    footer = ft.Container(
+        content=ft.Row(
+            [
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.BOLT, size=14, color=C_ON_SURFACE_VAR),
+                        stats_lbl,
+                    ],
+                    spacing=6,
+                ),
+                ft.Text("Версия 2.0 · Luminous", size=11, color=C_OUTLINE_VAR),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        bgcolor=C_HEADER,
+        bgcolor=C_CONTAINER_LOW,
         padding=ft.Padding(left=24, right=24, top=0, bottom=0),
-        height=36,
+        height=32,
+        border=ft.Border(top=ft.BorderSide(1, "#e4e7e7")),
     )
 
+    # ── Register dialog & build page ──────────────────────────────────────
     page.overlay.append(dl_dialog)
 
     page.add(
         ft.Column(
             [
-                title_bar,
-                settings_bar,
-                content_area,
-                output_container,
-                statusbar,
+                header,
+                config_bar,
+                middle_section,
+                output_section,
+                footer,
             ],
             spacing=0,
             expand=True,
