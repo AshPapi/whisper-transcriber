@@ -22,7 +22,6 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          # Используем версию, которую потребовал flet в логах
           flutter-version: "3.41.4"
           channel: "stable"
 
@@ -36,9 +35,10 @@ jobs:
       - name: Build Flet App
         env:
           PYTHONIOENCODING: utf-8
+        shell: pwsh
         run: |
-          # --no-interactive критически важен для работы на сервере
-          flet build windows main.py --no-interactive --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
+          # Используем эхо "y", чтобы автоматически отвечать на запросы Flet
+          echo "y" | flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
 
       - name: Zip output
         shell: pwsh
@@ -46,7 +46,7 @@ jobs:
           if (Test-Path build\windows) {
             Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip -Force
           } else {
-            Write-Error "Build directory not found! Check flet build logs above."
+            Write-Error "Build directory not found!"
             exit 1
           }
 
