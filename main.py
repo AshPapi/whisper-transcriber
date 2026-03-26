@@ -33,6 +33,14 @@ def _ensure_ffmpeg():
 _ensure_ffmpeg()
 
 DEFAULT_MODELS_DIR = str(Path.home() / "whisper_models")
+
+WHISPER_MODELS = [
+    ("tiny",     "~75 MB"),
+    ("base",     "~145 MB"),
+    ("small",    "~466 MB"),
+    ("medium",   "~1.5 GB"),
+    ("large-v3", "~3 GB"),
+]
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v"}
 SETTINGS_FILE = Path.home() / ".whisper_transcriber.json"
 
@@ -210,6 +218,94 @@ async def main(page: ft.Page):
     status_lbl      = ft.Text("готов", size=12, color="#94a3b8")
     stats_lbl       = ft.Text("", size=12, color="#94a3b8")
     model_count_lbl = ft.Text("", size=12, color=C_MUTED)
+
+    # ── Диалог скачивания модели ───────────────────────────────────────────
+    dl_model_dd = ft.Dropdown(
+        value="small",
+        options=[ft.dropdown.Option(key=m, text=f"{m}  ({sz})") for m, sz in WHISPER_MODELS],
+        text_style=ft.TextStyle(color=C_TEXT, size=13),
+        bgcolor=C_INPUT,
+        border_color="transparent",
+        focused_border_color=C_PRIMARY,
+        border_radius=8,
+        width=220,
+    )
+    dl_status_lbl = ft.Text("", size=12, color=C_MUTED)
+    dl_progress = ft.ProgressBar(width=320, visible=False, color=C_PRIMARY, bgcolor=C_BORDER)
+    dl_btn_start = ft.TextButton("Скачать")
+    dl_btn_close = ft.TextButton("Закрыть")
+
+    dl_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Скачать модель Whisper", size=15, weight=ft.FontWeight.W_600),
+        content=ft.Column(
+            [
+                ft.Text("Выберите размер модели:", size=13, color=C_MUTED),
+                dl_model_dd,
+                dl_progress,
+                dl_status_lbl,
+            ],
+            spacing=12,
+            tight=True,
+            width=340,
+        ),
+        actions=[dl_btn_start, dl_btn_close],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    def _do_download(model_name: str, dest_dir: str):
+        try:
+            from huggingface_hub import snapshot_download
+            repo_id = f"Systran/faster-whisper-{model_name}"
+            local_dir = str(Path(dest_dir) / f"faster-whisper-{model_name}")
+            page.run_thread(lambda: _dl_set_status(f"скачивание {model_name}…", indeterminate=True))
+            snapshot_download(repo_id=repo_id, local_dir=local_dir)
+            page.run_thread(lambda: _dl_done(model_name))
+        except Exception as ex:
+            page.run_thread(lambda: _dl_set_status(f"ошибка: {ex}", indeterminate=False))
+
+    def _dl_set_status(text: str, indeterminate: bool):
+        dl_status_lbl.value = text
+        dl_progress.visible = indeterminate
+        dl_btn_start.disabled = indeterminate
+        page.update()
+
+    def _dl_done(model_name: str):
+        dl_status_lbl.value = f"✓ {model_name} скачана"
+        dl_status_lbl.color = "#4ade80"
+        dl_progress.visible = False
+        dl_btn_start.disabled = False
+        page.update()
+        _scan_models()
+
+    def _on_dl_start(e):
+        model_name = dl_model_dd.value
+        dest_dir = models_dir_field.value or DEFAULT_MODELS_DIR
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        dl_status_lbl.color = C_MUTED
+        threading.Thread(target=_do_download, args=(model_name, dest_dir), daemon=True).start()
+
+    def _on_dl_close(e):
+        dl_dialog.open = False
+        page.update()
+
+    dl_btn_start.on_click = _on_dl_start
+    dl_btn_close.on_click = _on_dl_close
+
+    def _open_dl_dialog(e):
+        dl_status_lbl.value = ""
+        dl_status_lbl.color = C_MUTED
+        dl_progress.visible = False
+        dl_btn_start.disabled = False
+        page.open(dl_dialog)
+
+    download_model_btn = ft.TextButton(
+        "↓ Скачать модель",
+        style=ft.ButtonStyle(
+            color={CS.DEFAULT: C_PRIMARY, CS.HOVERED: C_PRI2},
+        ),
+        on_click=_open_dl_dialog,
+    )
 
     progress_bar = ft.ProgressBar(
         width=80, height=3,
@@ -578,6 +674,7 @@ async def main(page: ft.Page):
                 _labeled("beam", beam_field),
                 _divider(),
                 model_count_lbl,
+                download_model_btn,
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=12,
@@ -617,6 +714,8 @@ async def main(page: ft.Page):
         padding=ft.Padding(left=24, right=24, top=0, bottom=0),
         height=36,
     )
+
+    page.overlay.append(dl_dialog)
 
     page.add(
         ft.Column(
