@@ -762,19 +762,39 @@ async def main(page: ft.Page):
     config_bar = ft.Container(
         content=ft.Row(
             [
-                _labeled("Путь к модели", models_dir_field, folder_btn, refresh_btn),
-                _vdivider(),
-                _labeled("Модель", model_dd, download_model_btn),
-                _vdivider(),
-                _labeled("Устройство", device_dd),
-                _labeled("Язык", lang_dd),
-                _vdivider(),
-                _labeled("Beam Size", beam_field),
-                ft.Container(expand=True),
-                model_count_lbl,
+                ft.ResponsiveRow(
+                    [
+                        ft.Column(
+                            [_labeled("Путь к модели", models_dir_field, folder_btn, refresh_btn)],
+                            col={"xs": 12, "sm": 12, "md": 4, "lg": 3},
+                        ),
+                        ft.Column(
+                            [_labeled("Модель", model_dd, download_model_btn)],
+                            col={"xs": 12, "sm": 6, "md": 4, "lg": 3},
+                        ),
+                        ft.Column(
+                            [_labeled("Устройство", device_dd)],
+                            col={"xs": 6, "sm": 4, "md": 2, "lg": 2},
+                        ),
+                        ft.Column(
+                            [_labeled("Язык", lang_dd)],
+                            col={"xs": 6, "sm": 4, "md": 2, "lg": 2},
+                        ),
+                        ft.Column(
+                            [_labeled("Beam Size", beam_field)],
+                            col={"xs": 6, "sm": 4, "md": 2, "lg": 1},
+                        ),
+                        ft.Column(
+                            [ft.Container(height=20), model_count_lbl],
+                            col={"xs": 6, "sm": 4, "md": 2, "lg": 1},
+                        ),
+                    ],
+                    spacing=12,
+                    run_spacing=8,
+                    expand=True,
+                ),
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12,
         ),
         bgcolor=C_CONTAINER,
         padding=ft.Padding(left=24, right=24, top=12, bottom=12),
@@ -843,7 +863,7 @@ async def main(page: ft.Page):
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
         padding=ft.Padding(left=24, right=24, top=20, bottom=0),
-        height=300,
+        expand=1,
     )
 
     # ── Transcription section ─────────────────────────────────────────────
@@ -872,7 +892,7 @@ async def main(page: ft.Page):
         bgcolor=C_WHITE,
         border_radius=ft.BorderRadius(top_left=12, top_right=12, bottom_left=0, bottom_right=0),
         margin=ft.Margin(left=24, right=24, top=16, bottom=0),
-        expand=True,
+        expand=2,
         shadow=ft.BoxShadow(
             blur_radius=20,
             color="#0000000f",
