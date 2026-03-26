@@ -1,6 +1,7 @@
 import sys
 import os
 import locale
+import asyncio
 import threading
 import json
 import tempfile
@@ -106,14 +107,13 @@ def _default_device() -> str:
     return "cpu"
 
 
-class TranscribeWorker(threading.Thread):
+class TranscribeWorker:
     def __init__(self, model_path, audio_path, language, beam_size, device,
                  on_progress, on_finished, on_error):
-        super().__init__(daemon=True)
         self.model_path = model_path
         self.audio_path = audio_path
         self.language = language if language != "auto" else None
-        self.beam_size = int(beam_size)
+        self.beam_size = beam_size
         self.device = device
         self.on_progress = on_progress
         self.on_finished = on_finished
@@ -176,7 +176,13 @@ class TranscribeWorker(threading.Thread):
 
         except Exception as e:
             import traceback
-            Path("error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            log_path = Path(self.audio_path).parent / "error.log"
+            try:
+                log_path.write_text(traceback.format_exc(), encoding="utf-8")
+            except Exception:
+                Path.home().joinpath("whisper_error.log").write_text(
+                    traceback.format_exc(), encoding="utf-8"
+                )
             self.on_error(str(e))
         finally:
             if tmp_file and os.path.exists(tmp_file):
@@ -197,31 +203,30 @@ async def main(page: ft.Page):
     state = {"worker": None, "audio_path": None}
 
     # ── Pulse dot ────────────────────────────────────────────────────────
-    pulse_timer_ref = [None]
-    pulse_on = [True]
+    pulse_task_ref: list[asyncio.Task | None] = [None]
 
     pulse_dot = ft.Container(width=8, height=8, border_radius=4, bgcolor="#5da2ff")
 
-    def _pulse_tick():
-        pulse_on[0] = not pulse_on[0]
-        pulse_dot.bgcolor = "#5da2ff" if pulse_on[0] else C_PRIMARY
-        page.update()
-        t = threading.Timer(0.65, _pulse_tick)
-        t.daemon = True
-        pulse_timer_ref[0] = t
-        t.start()
+    async def _pulse_loop():
+        toggle = True
+        try:
+            while True:
+                toggle = not toggle
+                pulse_dot.bgcolor = "#5da2ff" if toggle else C_PRIMARY
+                page.update()
+                await asyncio.sleep(0.65)
+        except asyncio.CancelledError:
+            pass
 
     def pulse_start():
+        pulse_stop()
         pulse_dot.bgcolor = "#5da2ff"
-        t = threading.Timer(0.65, _pulse_tick)
-        t.daemon = True
-        pulse_timer_ref[0] = t
-        t.start()
+        pulse_task_ref[0] = asyncio.ensure_future(_pulse_loop())
 
     def pulse_stop():
-        if pulse_timer_ref[0]:
-            pulse_timer_ref[0].cancel()
-            pulse_timer_ref[0] = None
+        if pulse_task_ref[0]:
+            pulse_task_ref[0].cancel()
+            pulse_task_ref[0] = None
         pulse_dot.bgcolor = "#4ade80"
 
     # ── Status labels ────────────────────────────────────────────────────
@@ -292,6 +297,7 @@ async def main(page: ft.Page):
     beam_field = _text_field(
         value=str(settings.get("beam", 5)),
         keyboard_type=ft.KeyboardType.NUMBER,
+        input_filter=ft.NumbersOnlyInputFilter(),
         width=52,
         height=40,
     )
@@ -356,16 +362,11 @@ async def main(page: ft.Page):
         dest_dir = models_dir_field.value or DEFAULT_MODELS_DIR
         Path(dest_dir).mkdir(parents=True, exist_ok=True)
         dl_status_lbl.color = C_ON_SURFACE_VAR
-        threading.Thread(
-            target=_do_download,
-            args=(dl_model_dd.value, dest_dir),
-            daemon=True,
-        ).start()
+        page.run_thread(_do_download, dl_model_dd.value, dest_dir)
 
     def _on_dl_close(e):
         if not dl_btn_start.disabled:
-            dl_dialog.open = False
-            page.update()
+            page.pop_dialog()
 
     dl_btn_start.on_click = _on_dl_start
     dl_btn_close.on_click = _on_dl_close
@@ -375,12 +376,11 @@ async def main(page: ft.Page):
         dl_status_lbl.color = C_ON_SURFACE_VAR
         dl_progress.visible = False
         dl_btn_start.disabled = False
-        dl_dialog.open = True
-        page.update()
+        page.show_dialog(dl_dialog)
 
     # ── Drop zone ─────────────────────────────────────────────────────────
     drop_icon_ctrl = ft.Icon(ft.Icons.UPLOAD_FILE_OUTLINED, size=36, color=C_PRIMARY)
-    drop_title     = ft.Text("Перетащите файлы сюда", size=17,
+    drop_title     = ft.Text("Выберите аудио или видео", size=17,
                              weight=ft.FontWeight.W_600, color=C_ON_SURFACE)
     drop_sub       = ft.Text("Поддерживаются форматы MP3, WAV, MP4, MKV",
                              size=12, color=C_ON_SURFACE_VAR)
@@ -498,7 +498,7 @@ async def main(page: ft.Page):
         icon_size=18,
         tooltip="Копировать",
         disabled=True,
-        on_click=lambda _: _on_copy(),
+        on_click=lambda _: page.run_task(_on_copy),
     )
     save_btn = ft.IconButton(
         icon=ft.Icons.DOWNLOAD_OUTLINED,
@@ -570,7 +570,13 @@ async def main(page: ft.Page):
             if model_dd.value not in paths:
                 model_dd.value = found[0][1]
             cnt = len(found)
-            model_count_lbl.value = f"{cnt} {'модель' if cnt == 1 else 'моделей'}"
+            if cnt % 10 == 1 and cnt % 100 != 11:
+                word = "модель"
+            elif cnt % 10 in (2, 3, 4) and cnt % 100 not in (12, 13, 14):
+                word = "модели"
+            else:
+                word = "моделей"
+            model_count_lbl.value = f"{cnt} {word}"
         else:
             model_dd.value = None
             model_count_lbl.value = "моделей нет"
@@ -593,11 +599,17 @@ async def main(page: ft.Page):
         pulse_start()
         _set_status("запуск...", C_PRIMARY)
 
+        try:
+            beam = int(beam_field.value)
+        except (ValueError, TypeError):
+            beam = 5
+        beam = max(1, min(beam, 20))
+
         w = TranscribeWorker(
             model_path=model_dd.value,
             audio_path=state["audio_path"],
             language=lang_dd.value or "auto",
-            beam_size=beam_field.value or "5",
+            beam_size=beam,
             device=device_dd.value or "cpu",
             on_progress=lambda msg: _set_status(msg, C_PRIMARY),
             on_finished=_on_finished,
@@ -605,7 +617,7 @@ async def main(page: ft.Page):
         )
         state["worker"] = w
         _update_run_btn()
-        w.start()
+        page.run_thread(w.run)
 
     def _on_stop():
         if state["worker"]:
@@ -635,15 +647,18 @@ async def main(page: ft.Page):
         _update_run_btn()
         page.update()
 
-    def _on_copy():
+    _copy_gen = [0]
+
+    async def _on_copy():
         if output_field.value:
             page.set_clipboard(output_field.value)
             old_v, old_c = status_lbl.value, status_lbl.color
+            _copy_gen[0] += 1
+            gen = _copy_gen[0]
             _set_status("скопировано ✓", "#16a34a")
-            def _restore():
-                import time; time.sleep(2)
+            await asyncio.sleep(2)
+            if _copy_gen[0] == gen:
                 _set_status(old_v, old_c)
-            threading.Thread(target=_restore, daemon=True).start()
 
     # ── UI Assembly ────────────────────────────────────────────────────────
 
@@ -696,14 +711,6 @@ async def main(page: ft.Page):
             [
                 ft.Icon(ft.Icons.GRAPHIC_EQ, color=C_PRIMARY, size=22),
                 ft.Container(expand=True),
-                ft.Row(
-                    [
-                        _icon_btn(ft.Icons.SETTINGS_OUTLINED, "Настройки"),
-                        _icon_btn(ft.Icons.HELP_OUTLINE, "Помощь"),
-                        _icon_btn(ft.Icons.ACCOUNT_CIRCLE_OUTLINED, "Профиль"),
-                    ],
-                    spacing=2,
-                ),
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
@@ -913,9 +920,7 @@ async def main(page: ft.Page):
         border=ft.Border(top=ft.BorderSide(1, "#e4e7e7")),
     )
 
-    # ── Register dialog & build page ──────────────────────────────────────
-    page.overlay.append(dl_dialog)
-
+    # ── Build page ─────────────────────────────────────────────────────────
     page.add(
         ft.Column(
             [
