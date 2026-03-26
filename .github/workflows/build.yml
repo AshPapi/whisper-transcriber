@@ -1,0 +1,42 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.0"
+          channel: "stable"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "flet>=0.24.0"
+          pip install -r requirements.txt
+          pip install static-ffmpeg
+
+      - name: Build
+        run: flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
+
+      - name: Zip output
+        run: Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperTranscriber-Windows
+          path: WhisperTranscriber-Windows.zip
+          if-no-files-found: error
