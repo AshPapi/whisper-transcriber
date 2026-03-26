@@ -10,13 +10,17 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip' # Ускоряет повторные билды
 
-      - uses: subosito/flutter-action@v2
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.27.0"
           channel: "stable"
@@ -25,14 +29,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "flet>=0.24.0"
-          pip install -r requirements.txt
+          # Если файла requirements.txt нет, команда ниже выдаст ошибку. 
+          # Если он есть, она установит whisper и прочее.
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
           pip install static-ffmpeg
 
-      - name: Build
-        run: flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
+      - name: Build Flet App
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          flet build windows main.py --project "Whisper Transcriber" --product "Whisper Transcriber" --org com.whisper
 
       - name: Zip output
-        run: Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip
+        shell: pwsh
+        run: |
+          # Проверяем, создалась ли папка build\windows перед архивацией
+          if (Test-Path build\windows) {
+            Compress-Archive -Path build\windows\* -DestinationPath WhisperTranscriber-Windows.zip -Force
+          } else {
+            Write-Error "Build directory not found!"
+            exit 1
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
