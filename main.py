@@ -663,7 +663,8 @@ async def main(page: ft.Page):
         return ft.Column(
             [
                 ft.Text(label.upper(), size=10, color=C_ON_SURFACE_VAR,
-                        weight=ft.FontWeight.W_500, letter_spacing=0.8),
+                        weight=ft.FontWeight.W_500,
+                        style=ft.TextStyle(letter_spacing=0.8)),
                 ft.Row(list(controls), spacing=6,
                        vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ],
@@ -698,7 +699,7 @@ async def main(page: ft.Page):
                         ft.Icon(ft.Icons.GRAPHIC_EQ, color=C_PRIMARY, size=22),
                         ft.Text("Luminous Transcription", size=16,
                                 weight=ft.FontWeight.W_700, color=C_ON_SURFACE,
-                                letter_spacing=-0.3),
+                                style=ft.TextStyle(letter_spacing=-0.3)),
                     ],
                     spacing=10,
                 ),
@@ -808,7 +809,8 @@ async def main(page: ft.Page):
         content=ft.Column(
             [
                 ft.Text("ИНФОРМАЦИЯ О ФАЙЛЕ", size=10, color=C_ON_SURFACE_VAR,
-                        weight=ft.FontWeight.W_600, letter_spacing=1.2),
+                        weight=ft.FontWeight.W_600,
+                        style=ft.TextStyle(letter_spacing=1.2)),
                 ft.Container(height=4),
                 _info_row(ft.Icons.DESCRIPTION_OUTLINED, "Имя файла", file_name_lbl),
                 _info_row(ft.Icons.SCHEDULE_OUTLINED, "Статус", status_lbl),
