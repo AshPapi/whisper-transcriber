@@ -286,8 +286,9 @@ async def main(page: ft.Page):
         threading.Thread(target=_do_download, args=(model_name, dest_dir), daemon=True).start()
 
     def _on_dl_close(e):
-        dl_dialog.open = False
-        page.update()
+        if not dl_btn_start.disabled:
+            dl_dialog.open = False
+            page.update()
 
     dl_btn_start.on_click = _on_dl_start
     dl_btn_close.on_click = _on_dl_close
@@ -297,7 +298,8 @@ async def main(page: ft.Page):
         dl_status_lbl.color = C_MUTED
         dl_progress.visible = False
         dl_btn_start.disabled = False
-        page.open(dl_dialog)
+        dl_dialog.open = True
+        page.update()
 
     download_model_btn = ft.TextButton(
         "↓ Скачать модель",
