@@ -80,8 +80,9 @@ async def _broadcast(event: dict):
 
 def _broadcast_sync(event: dict):
     """Thread-safe broadcast из worker-треда."""
-    if _main_loop and _main_loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast(event), _main_loop)
+    loop = _main_loop
+    if loop and loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast(event), loop)
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):

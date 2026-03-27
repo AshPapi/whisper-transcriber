@@ -649,7 +649,10 @@ class _AppScreenState extends State<AppScreen> {
       itemBuilder: (ctx, i) => _TaskCard(
         task: _tasks[i],
         onView: () => setState(() => _viewingTask = _tasks[i]),
-        onCancel: () => _backend.cancelTask(_tasks[i].taskId),
+        onCancel: () {
+          _backend.cancelTask(_tasks[i].taskId);
+          setState(() => _tasks[i].status = TaskStatus.cancelled);
+        },
         onDelete: () => setState(() => _tasks.removeAt(i)),
       ),
     );
