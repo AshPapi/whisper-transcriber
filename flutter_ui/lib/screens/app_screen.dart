@@ -444,7 +444,10 @@ class _AppScreenState extends State<AppScreen> {
                       .map((l) => DropdownMenuItem(
                           value: l.$1, child: Text(l.$2)))
                       .toList(),
-                  onChanged: (v) => setState(() => _lang = v!),
+                  onChanged: (v) {
+                    setState(() => _lang = v!);
+                    _backend.updateSettings({'lang': v});
+                  },
                 ),
               ),
               const SizedBox(width: 8),
@@ -458,7 +461,10 @@ class _AppScreenState extends State<AppScreen> {
                     DropdownMenuItem(value: 'cpu', child: Text('CPU')),
                     DropdownMenuItem(value: 'cuda', child: Text('CUDA')),
                   ],
-                  onChanged: (v) => setState(() => _device = v!),
+                  onChanged: (v) {
+                    setState(() => _device = v!);
+                    _backend.updateSettings({'device': v});
+                  },
                 ),
               ),
               const SizedBox(width: 8),
@@ -471,7 +477,10 @@ class _AppScreenState extends State<AppScreen> {
                   keyboardType: TextInputType.number,
                   onChanged: (v) {
                     final n = int.tryParse(v);
-                    if (n != null && n >= 1) setState(() => _beam = n);
+                    if (n != null && n >= 1) {
+                      setState(() => _beam = n);
+                      _backend.updateSettings({'beam': n});
+                    }
                   },
                 ),
               ),
