@@ -1,0 +1,26 @@
+name: whisper_transcriber
+description: Professional desktop transcription app powered by OpenAI Whisper.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.1
+  web_socket_channel: ^3.0.1
+  file_picker: ^8.0.7
+  desktop_drop: ^0.4.4
+  provider: ^6.1.2
+  shared_preferences: ^2.3.1
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
