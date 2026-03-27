@@ -25,16 +25,23 @@ Future<void> _startBackend() async {
   );
 }
 
+Future<void> _waitForBackend() async {
+  const timeout = Duration(seconds: 90);
+  const interval = Duration(milliseconds: 500);
+  final deadline = DateTime.now().add(timeout);
+
+  while (DateTime.now().isBefore(deadline)) {
+    if (await BackendService.instance.isAlive()) return;
+    await Future.delayed(interval);
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _startBackend();
-
-  // Give backend a moment to bind the port
-  await Future.delayed(const Duration(seconds: 2));
-
-  BackendService.instance.connectWebSocket();
   runApp(const WhisperApp());
 }
+
 
 class WhisperApp extends StatefulWidget {
   const WhisperApp({super.key});
@@ -84,14 +91,23 @@ class _MainShellState extends State<MainShell> {
   final List<TranscribeTask> _tasks = [];
   TranscribeTask? _viewingResult;
   bool _backendAlive = false;
+  bool _backendReady = false;
   StreamSubscription? _eventSub;
   Timer? _healthTimer;
 
   @override
   void initState() {
     super.initState();
-    _startHealthCheck();
+    _waitForBackendThenConnect();
     _eventSub = BackendService.instance.events.listen(_onEvent);
+  }
+
+  Future<void> _waitForBackendThenConnect() async {
+    await _waitForBackend();
+    if (!mounted) return;
+    setState(() => _backendReady = true);
+    BackendService.instance.connectWebSocket();
+    _startHealthCheck();
   }
 
   @override
@@ -255,6 +271,27 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildBody() {
+    if (!_backendReady) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 20),
+            const Text('Starting backend…',
+                style: TextStyle(fontSize: 15)),
+            const SizedBox(height: 8),
+            Text('First launch may take up to a minute',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.5))),
+          ],
+        ),
+      );
+    }
     if (_navIndex == 0) {
       return HomeScreen(onTranscribeStarted: _onTranscribeStarted);
     }
