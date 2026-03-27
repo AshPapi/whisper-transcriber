@@ -320,4 +320,4 @@ if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()  # required for PyInstaller on Windows
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8765, reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=8765, reload=False, log_level="info")

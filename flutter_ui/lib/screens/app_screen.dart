@@ -462,6 +462,8 @@ class _AppScreenState extends State<AppScreen> {
     final dir = _modelsDir.isEmpty
         ? '${Platform.environment['USERPROFILE'] ?? ''}\\whisper_models'
         : _modelsDir;
+    // Create directory if it doesn't exist so Explorer opens it (not Documents)
+    Directory(dir).createSync(recursive: true);
     Process.run('explorer', [dir]);
   }
 

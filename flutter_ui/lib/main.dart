@@ -18,7 +18,7 @@ Future<void> _startBackend() async {
   _backendProcess = await Process.start(
     backendExe, [],
     workingDirectory: p.dirname(backendExe),
-    mode: ProcessStartMode.detachedWithStdio,
+    mode: ProcessStartMode.normal,
   );
 }
 
