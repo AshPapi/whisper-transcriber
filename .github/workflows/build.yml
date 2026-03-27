@@ -61,10 +61,11 @@ jobs:
           flutter-version: "3.32.0"
           channel: "stable"
 
-      - name: Flutter pub get
+      - name: Flutter pub get & enable Windows
         shell: pwsh
         run: |
           cd flutter_ui
+          flutter create --platforms=windows .
           flutter pub get
 
       - name: Build Flutter Windows app
