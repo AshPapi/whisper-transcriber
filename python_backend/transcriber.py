@@ -151,7 +151,9 @@ class TranscribeWorker:
                 all_segments.append(segment)
                 self.on_segment(self.task_id, segment)
                 pct = int((i + 1) * 100 / total_segs) if total_segs > 0 else 0
-                self.on_status(self.task_id, f"transcribing:{pct}")
+                # Update progress every 5% to avoid flooding WebSocket
+                if pct % 5 == 0 or i == total_segs - 1:
+                    self.on_status(self.task_id, f"transcribing:{pct}")
 
             if not self._stop.is_set():
                 self.on_finished(self.task_id, all_segments)
