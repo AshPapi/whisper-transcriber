@@ -74,7 +74,7 @@ _main_loop: asyncio.AbstractEventLoop = None
 
 async def _broadcast(event: dict):
     dead = set()
-    for ws in _ws_clients:
+    for ws in list(_ws_clients):  # iterate copy to avoid RuntimeError on set mutation
         try:
             await ws.send_json(event)
         except Exception:
@@ -191,8 +191,11 @@ async def _queue_runner():
         with _lock:
             task = _tasks.get(task_id)
             worker = _workers.get(task_id)
-        if not task or not worker:
-            continue
+            # Skip cancelled/errored tasks
+            if not task or not worker or task.get("status") not in ("queued",):
+                _workers.pop(task_id, None)
+                _task_done_events.pop(task_id, None)
+                continue
         worker.start()
         # wait for completion signal from callbacks
         done_evt = _task_done_events.get(task_id)

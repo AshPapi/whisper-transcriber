@@ -109,7 +109,8 @@ def download_model(
 
     try:
         import requests
-        with requests.get(url, stream=True, timeout=30) as r:
+        import certifi
+        with requests.get(url, stream=True, timeout=30, verify=certifi.where()) as r:
             r.raise_for_status()
             total_size = int(r.headers.get('content-length', 0))
             bytes_done = 0

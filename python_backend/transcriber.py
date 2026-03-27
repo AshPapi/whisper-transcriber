@@ -128,18 +128,9 @@ class TranscribeWorker:
             if self._stop.is_set():
                 return
 
-            self.on_status(self.task_id, "transcribing:0")
+            self.on_status(self.task_id, "transcribing")
 
             all_segments = []
-
-            # Get duration for progress calculation
-            import wave, contextlib
-            duration = 0.0
-            try:
-                with contextlib.closing(wave.open(tmp_path, 'r')) as f:
-                    duration = f.getnframes() / float(f.getframerate())
-            except Exception:
-                pass
 
             fp16 = (device != "cpu")
             try:

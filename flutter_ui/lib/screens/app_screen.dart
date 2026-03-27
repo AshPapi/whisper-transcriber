@@ -684,9 +684,13 @@ class _AppScreenState extends State<AppScreen> {
       itemBuilder: (ctx, i) => _TaskCard(
         task: _tasks[i],
         onView: () => setState(() => _viewingTask = _tasks[i]),
-        onCancel: () {
-          _backend.cancelTask(_tasks[i].taskId);
+        onCancel: () async {
           setState(() => _tasks[i].status = TaskStatus.cancelled);
+          try {
+            await _backend.cancelTask(_tasks[i].taskId);
+          } catch (_) {
+            // Task may already be done/errored on backend — UI already updated
+          }
         },
         onDelete: () => setState(() => _tasks.removeAt(i)),
       ),
@@ -766,9 +770,9 @@ class _TaskCard extends StatelessWidget {
   double? _transcribeProgress(String s) {
     if (s.startsWith('transcribing:')) {
       final pct = int.tryParse(s.split(':').last) ?? 0;
-      return pct > 0 ? pct / 100.0 : null;
+      return pct > 0 ? pct / 100.0 : null; // null = indeterminate (pulsing)
     }
-    return null;
+    return null; // indeterminate for loading_model, extracting_audio, etc.
   }
 
   Widget _statusIcon(ColorScheme cs) {
