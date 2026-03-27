@@ -67,6 +67,7 @@ app.add_middleware(
 
 # ── WebSocket hub ────────────────────────────────────────────────────────────
 _ws_clients: set[WebSocket] = set()
+_main_loop: asyncio.AbstractEventLoop = None
 
 async def _broadcast(event: dict):
     dead = set()
@@ -79,9 +80,8 @@ async def _broadcast(event: dict):
 
 def _broadcast_sync(event: dict):
     """Thread-safe broadcast из worker-треда."""
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast(event), loop)
+    if _main_loop and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_broadcast(event), _main_loop)
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -171,7 +171,8 @@ _task_queue: asyncio.Queue = None      # populated on startup
 
 @app.on_event("startup")
 async def _startup():
-    global _task_queue
+    global _task_queue, _main_loop
+    _main_loop = asyncio.get_event_loop()
     _task_queue = asyncio.Queue()
     asyncio.create_task(_queue_runner())
 
