@@ -143,21 +143,42 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: ListView.separated(
-              itemCount: _models.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (ctx, i) {
-                final m = _models[i];
-                final dl = _dlState[m.name];
-                return _ModelCard(
-                  model: m,
-                  dlState: dl,
-                  onDownload: () => _startDownload(m.name),
-                  onCancel: () => _cancelDownload(m.name),
-                  onDelete: () => _delete(m.name),
-                );
-              },
-            ),
+            child: _models.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cloud_off_outlined,
+                            size: 48,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.3)),
+                        const SizedBox(height: 12),
+                        const Text('Could not load models'),
+                        const SizedBox(height: 12),
+                        FilledButton.tonal(
+                          onPressed: _loadModels,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _models.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, i) {
+                      final m = _models[i];
+                      final dl = _dlState[m.name];
+                      return _ModelCard(
+                        model: m,
+                        dlState: dl,
+                        onDownload: () => _startDownload(m.name),
+                        onCancel: () => _cancelDownload(m.name),
+                        onDelete: () => _delete(m.name),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
