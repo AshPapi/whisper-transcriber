@@ -59,6 +59,12 @@ class _AppScreenState extends State<AppScreen> {
   // ── Download state ──
   final Map<String, _DlState> _dlState = {};
 
+  // ── Devices (loaded from backend) ──
+  List<Map<String, String>> _devices = [
+    {'id': 'cpu', 'name': 'CPU'},
+    {'id': 'cuda', 'name': 'CUDA'},
+  ];
+
   // ── UI state ──
   bool _transcribing = false;
   String? _error;
@@ -104,6 +110,19 @@ class _AppScreenState extends State<AppScreen> {
     } catch (_) {}
 
     try {
+      final devices = await _backend.getDevices();
+      if (mounted && devices.isNotEmpty) {
+        setState(() {
+          _devices = devices;
+          // Ensure current device is in the list
+          if (!_devices.any((d) => d['id'] == _device)) {
+            _device = _devices.first['id']!;
+          }
+        });
+      }
+    } catch (_) {}
+
+    try {
       final models = await _backend.getModels();
       if (!mounted) return;
       setState(() {
@@ -142,6 +161,7 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   void _onEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
     final type = event['type'] as String?;
 
     // ── Transcription events ──
@@ -183,8 +203,14 @@ class _AppScreenState extends State<AppScreen> {
           setState(() => _dlState.remove(name));
           _loadModelsOnly();
         case 'download_cancelled':
+          setState(() => _dlState.remove(name));
         case 'download_error':
           setState(() => _dlState.remove(name));
+          if (mounted) {
+            final msg = event['msg'] as String? ?? 'Неизвестная ошибка';
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Ошибка загрузки $name: $msg')));
+          }
       }
     }
   }
@@ -223,9 +249,8 @@ class _AppScreenState extends State<AppScreen> {
         device: _device,
       );
       setState(() {
-        for (final id in ids) {
-          final file = _files[ids.indexOf(id)];
-          _tasks.insert(0, TranscribeTask(taskId: id, file: file, model: _selectedModel!));
+        for (var i = 0; i < ids.length; i++) {
+          _tasks.insert(0, TranscribeTask(taskId: ids[i], file: _files[i], model: _selectedModel!));
         }
         _files = [];
       });
@@ -454,17 +479,18 @@ class _AppScreenState extends State<AppScreen> {
               Expanded(
                 flex: 2,
                 child: DropdownButtonFormField<String>(
-                  value: _device,
+                  value: _devices.any((d) => d['id'] == _device) ? _device : _devices.first['id'],
                   decoration: const InputDecoration(
                       labelText: 'Устройство', isDense: true),
-                  items: const [
-                    DropdownMenuItem(value: 'cpu', child: Text('CPU')),
-                    DropdownMenuItem(value: 'cuda', child: Text('CUDA')),
-                  ],
+                  items: _devices
+                      .map((d) => DropdownMenuItem(
+                          value: d['id'], child: Text(d['name']!, overflow: TextOverflow.ellipsis)))
+                      .toList(),
                   onChanged: (v) {
                     setState(() => _device = v!);
                     _backend.updateSettings({'device': v});
                   },
+                  isExpanded: true,
                 ),
               ),
               const SizedBox(width: 8),
@@ -517,7 +543,7 @@ class _AppScreenState extends State<AppScreen> {
           onTap: _openModelsFolder,
           borderRadius: BorderRadius.circular(4),
           child: Tooltip(
-            message: 'Open folder',
+            message: 'Открыть папку',
             child: Icon(Icons.open_in_new, size: 14,
                 color: cs.onSurface.withValues(alpha: 0.4)),
           ),
@@ -885,7 +911,7 @@ class _ResultViewState extends State<_ResultView> {
     };
     final base = widget.task.fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
     final path = await FilePicker.platform
-        .saveFile(dialogTitle: 'Save $format', fileName: '$base.$format');
+        .saveFile(dialogTitle: 'Сохранить $format', fileName: '$base.$format');
     if (path == null) return;
     await File(path).writeAsString(content, encoding: utf8);
     if (mounted) {

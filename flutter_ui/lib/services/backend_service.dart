@@ -12,30 +12,55 @@ class BackendService {
   BackendService._();
 
   WebSocketChannel? _channel;
+  StreamSubscription? _wsSub;
   final _eventController = StreamController<Map<String, dynamic>>.broadcast();
+  bool _disposed = false;
 
   Stream<Map<String, dynamic>> get events => _eventController.stream;
 
   void connectWebSocket() {
-    _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
-    _channel!.stream.listen(
-      (data) {
-        try {
-          final event = json.decode(data as String) as Map<String, dynamic>;
-          _eventController.add(event);
-        } catch (_) {}
-      },
-      onDone: () {
+    if (_disposed) return;
+    // Close previous connection and subscription
+    _wsSub?.cancel();
+    _wsSub = null;
+    try { _channel?.sink.close(); } catch (_) {}
+    _channel = null;
+
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      _wsSub = _channel!.stream.listen(
+        (data) {
+          try {
+            final event = json.decode(data as String) as Map<String, dynamic>;
+            if (!_eventController.isClosed) {
+              _eventController.add(event);
+            }
+          } catch (_) {}
+        },
+        onDone: () {
+          if (!_disposed) {
+            Future.delayed(const Duration(seconds: 2), connectWebSocket);
+          }
+        },
+        onError: (_) {
+          if (!_disposed) {
+            Future.delayed(const Duration(seconds: 2), connectWebSocket);
+          }
+        },
+      );
+    } catch (_) {
+      if (!_disposed) {
         Future.delayed(const Duration(seconds: 2), connectWebSocket);
-      },
-      onError: (_) {
-        Future.delayed(const Duration(seconds: 2), connectWebSocket);
-      },
-    );
+      }
+    }
   }
 
   void dispose() {
-    _channel?.sink.close();
+    _disposed = true;
+    _wsSub?.cancel();
+    _wsSub = null;
+    try { _channel?.sink.close(); } catch (_) {}
+    _channel = null;
     _eventController.close();
   }
 
@@ -60,7 +85,9 @@ class BackendService {
   }
 
   Future<void> cancelDownload(String name) async {
-    await http.delete(Uri.parse('$_baseUrl/models/download/$name'));
+    final resp =
+        await http.delete(Uri.parse('$_baseUrl/models/download/$name'));
+    _checkStatus(resp);
   }
 
   Future<void> deleteModel(String name) async {
@@ -95,7 +122,9 @@ class BackendService {
   }
 
   Future<void> cancelTask(String taskId) async {
-    await http.delete(Uri.parse('$_baseUrl/transcribe/$taskId'));
+    final resp =
+        await http.delete(Uri.parse('$_baseUrl/transcribe/$taskId'));
+    _checkStatus(resp);
   }
 
   Future<List<Segment>> getResult(String taskId) async {
@@ -107,6 +136,24 @@ class BackendService {
     return list
         .map((e) => Segment.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // ── Devices ────────────────────────────────────────────────────────────────
+
+  Future<List<Map<String, String>>> getDevices() async {
+    try {
+      final resp = await http.get(Uri.parse('$_baseUrl/devices'));
+      _checkStatus(resp);
+      final list = json.decode(resp.body) as List;
+      return list
+          .map((e) => Map<String, String>.from(e as Map))
+          .toList();
+    } catch (_) {
+      return [
+        {'id': 'cpu', 'name': 'CPU'},
+        {'id': 'cuda', 'name': 'CUDA'},
+      ];
+    }
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ FastAPI backend для Whisper Transcriber.
 
 import asyncio
 import json
+import logging
 import threading
 import uuid
 from pathlib import Path
@@ -26,6 +27,8 @@ from model_manager import (
     scan_models,
 )
 from transcriber import TranscribeWorker
+
+log = logging.getLogger("whisper-backend")
 
 # ── ffmpeg ──────────────────────────────────────────────────────────────────
 try:
@@ -80,9 +83,12 @@ async def _broadcast(event: dict):
 
 def _broadcast_sync(event: dict):
     """Thread-safe broadcast из worker-треда."""
-    loop = _main_loop
-    if loop and loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast(event), loop)
+    try:
+        loop = _main_loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_broadcast(event), loop)
+    except Exception:
+        log.debug("broadcast_sync failed", exc_info=True)
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -166,9 +172,11 @@ class TranscribeRequest(BaseModel):
     beam_size: int = 5
     device: Optional[str] = None
 
+_lock = threading.Lock()              # protects _tasks and _workers
 _tasks: dict[str, dict] = {}          # task_id → task info
 _workers: dict[str, TranscribeWorker] = {}
 _task_queue: asyncio.Queue = None      # populated on startup
+_task_done_events: dict[str, asyncio.Event] = {}  # signals queue_runner
 
 @app.on_event("startup")
 async def _startup():
@@ -180,40 +188,59 @@ async def _startup():
 async def _queue_runner():
     while True:
         task_id = await _task_queue.get()
-        task = _tasks.get(task_id)
-        if not task:
-            continue
-        worker = _workers.get(task_id)
-        if not worker:
+        with _lock:
+            task = _tasks.get(task_id)
+            worker = _workers.get(task_id)
+        if not task or not worker:
             continue
         worker.start()
-        # wait for it to finish (or be cancelled)
-        while task["status"] in ("queued", "running"):
-            await asyncio.sleep(0.2)
+        # wait for completion signal from callbacks
+        done_evt = _task_done_events.get(task_id)
+        if done_evt:
+            await done_evt.wait()
+            _task_done_events.pop(task_id, None)
+        # cleanup worker reference
+        with _lock:
+            _workers.pop(task_id, None)
+
+
+def _signal_done(task_id: str):
+    """Signal the queue_runner that a task finished."""
+    evt = _task_done_events.get(task_id)
+    if evt:
+        loop = _main_loop
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(evt.set)
 
 
 def _on_status(task_id, status):
-    if task_id in _tasks:
-        _tasks[task_id]["status"] = "running"
-        _tasks[task_id]["status_text"] = status
+    with _lock:
+        if task_id in _tasks:
+            _tasks[task_id]["status"] = "running"
+            _tasks[task_id]["status_text"] = status
     _broadcast_sync({"type": "task_status", "task_id": task_id, "status": status})
 
 def _on_segment(task_id, segment):
-    if task_id in _tasks:
-        _tasks[task_id]["segments"].append(segment)
+    with _lock:
+        if task_id in _tasks:
+            _tasks[task_id]["segments"].append(segment)
     _broadcast_sync({"type": "segment", "task_id": task_id, "segment": segment})
 
 def _on_finished(task_id, segments):
-    if task_id in _tasks:
-        _tasks[task_id]["status"] = "done"
-        _tasks[task_id]["segments"] = segments
+    with _lock:
+        if task_id in _tasks:
+            _tasks[task_id]["status"] = "done"
+            _tasks[task_id]["segments"] = segments
     _broadcast_sync({"type": "task_done", "task_id": task_id})
+    _signal_done(task_id)
 
 def _on_error(task_id, msg):
-    if task_id in _tasks:
-        _tasks[task_id]["status"] = "error"
-        _tasks[task_id]["error"] = msg
+    with _lock:
+        if task_id in _tasks:
+            _tasks[task_id]["status"] = "error"
+            _tasks[task_id]["error"] = msg
     _broadcast_sync({"type": "task_error", "task_id": task_id, "msg": msg})
+    _signal_done(task_id)
 
 
 @app.post("/transcribe")
@@ -232,13 +259,6 @@ async def add_transcribe(req: TranscribeRequest):
             raise HTTPException(400, f"File not found: {file_path}")
 
         task_id = str(uuid.uuid4())
-        _tasks[task_id] = {
-            "task_id": task_id,
-            "file": file_path,
-            "model": req.model_name,
-            "status": "queued",
-            "segments": [],
-        }
 
         worker = TranscribeWorker(
             task_id=task_id,
@@ -252,7 +272,18 @@ async def add_transcribe(req: TranscribeRequest):
             on_finished=_on_finished,
             on_error=_on_error,
         )
-        _workers[task_id] = worker
+
+        with _lock:
+            _tasks[task_id] = {
+                "task_id": task_id,
+                "file": file_path,
+                "model": req.model_name,
+                "status": "queued",
+                "segments": [],
+            }
+            _workers[task_id] = worker
+
+        _task_done_events[task_id] = asyncio.Event()
         await _task_queue.put(task_id)
         task_ids.append(task_id)
 
@@ -261,18 +292,21 @@ async def add_transcribe(req: TranscribeRequest):
 
 @app.delete("/transcribe/{task_id}")
 def cancel_task(task_id: str):
-    worker = _workers.get(task_id)
-    if not worker:
-        raise HTTPException(404, "Task not found")
-    worker.stop()
-    if task_id in _tasks:
-        _tasks[task_id]["status"] = "cancelled"
+    with _lock:
+        worker = _workers.get(task_id)
+        if not worker:
+            raise HTTPException(404, "Task not found")
+        worker.stop()
+        if task_id in _tasks:
+            _tasks[task_id]["status"] = "cancelled"
+    _signal_done(task_id)
     return {"status": "cancelled"}
 
 
 @app.get("/transcribe/{task_id}")
 def get_task(task_id: str):
-    task = _tasks.get(task_id)
+    with _lock:
+        task = _tasks.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
     return task
@@ -280,10 +314,34 @@ def get_task(task_id: str):
 
 @app.get("/transcribe/{task_id}/result")
 def get_result(task_id: str):
-    task = _tasks.get(task_id)
+    with _lock:
+        task = _tasks.get(task_id)
     if not task:
         raise HTTPException(404, "Task not found")
     return {"task_id": task_id, "segments": task.get("segments", [])}
+
+# ── Devices ──────────────────────────────────────────────────────────────────
+
+@app.get("/devices")
+def get_devices():
+    """Return available compute devices."""
+    devices = [{"id": "cpu", "name": "CPU"}]
+    try:
+        import torch
+        if torch.cuda.is_available():
+            n = torch.cuda.device_count()
+            for i in range(n):
+                props = torch.cuda.get_device_properties(i)
+                mem_gb = round(props.total_memory / 1_073_741_824, 1)
+                devices.append({
+                    "id": f"cuda:{i}",
+                    "name": f"{props.name} ({mem_gb} GB)",
+                })
+            # "auto" option selects GPU with most VRAM
+            devices.append({"id": "cuda", "name": "CUDA (авто)" if n > 1 else "CUDA"})
+    except Exception:
+        pass
+    return devices
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 

@@ -96,14 +96,32 @@ class TranscribeWorker:
 
             import torch
             device = self.device
-            if device == "cuda":
+
+            if device.startswith("cuda"):
                 if not torch.cuda.is_available():
                     device = "cpu"
                 else:
-                    # Find the most powerful CUDA device (highest memory)
-                    best = max(range(torch.cuda.device_count()),
-                               key=lambda i: torch.cuda.get_device_properties(i).total_memory)
-                    device = f"cuda:{best}"
+                    n_gpus = torch.cuda.device_count()
+                    if device == "cuda" or device == "cuda:auto":
+                        # Auto-select GPU with the most VRAM
+                        best = max(range(n_gpus),
+                                   key=lambda i: torch.cuda.get_device_properties(i).total_memory)
+                        device = f"cuda:{best}"
+                    else:
+                        # Validate specific cuda:N index
+                        try:
+                            idx = int(device.split(":")[1])
+                            if idx >= n_gpus:
+                                # Fallback to auto-select
+                                best = max(range(n_gpus),
+                                           key=lambda i: torch.cuda.get_device_properties(i).total_memory)
+                                device = f"cuda:{best}"
+                        except (ValueError, IndexError):
+                            # Invalid format, auto-select
+                            best = max(range(n_gpus),
+                                       key=lambda i: torch.cuda.get_device_properties(i).total_memory)
+                            device = f"cuda:{best}"
+
             self.on_status(self.task_id, f"loading_model:{device.upper()}")
             model = whisper.load_model(self.model_path, device=device)
 

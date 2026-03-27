@@ -94,6 +94,7 @@ class _ShellState extends State<_Shell> {
   @override
   void dispose() {
     _healthTimer?.cancel();
+    BackendService.instance.dispose();
     _backendProcess?.kill();
     super.dispose();
   }
