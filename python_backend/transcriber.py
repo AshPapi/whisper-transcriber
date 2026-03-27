@@ -96,12 +96,16 @@ class TranscribeWorker:
 
             import torch
             device = self.device
-            if device == "cuda" and not torch.cuda.is_available():
-                device = "cpu"
+            if device == "cuda":
+                if not torch.cuda.is_available():
+                    device = "cpu"
+                else:
+                    # Find the most powerful CUDA device (highest memory)
+                    best = max(range(torch.cuda.device_count()),
+                               key=lambda i: torch.cuda.get_device_properties(i).total_memory)
+                    device = f"cuda:{best}"
             self.on_status(self.task_id, f"loading_model:{device.upper()}")
             model = whisper.load_model(self.model_path, device=device)
-            if device == "cuda":
-                model = model.cuda()
 
             if self._stop.is_set():
                 return
