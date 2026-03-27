@@ -139,7 +139,7 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
                 color: Theme.of(context)
                     .colorScheme
                     .onSurface
-                    .withOpacity(0.5)),
+                    .withValues(alpha:0.5)),
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -205,7 +205,7 @@ class _ModelCard extends StatelessWidget {
                       : Icons.cloud_download_outlined,
                   color: model.downloaded
                       ? Colors.green.shade600
-                      : cs.onSurface.withOpacity(0.4),
+                      : cs.onSurface.withValues(alpha:0.4),
                   size: 20,
                 ),
                 const SizedBox(width: 10),
@@ -215,14 +215,14 @@ class _ModelCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(model.sizeLabel,
                     style: TextStyle(
-                        fontSize: 12, color: cs.onSurface.withOpacity(0.5))),
+                        fontSize: 12, color: cs.onSurface.withValues(alpha:0.5))),
                 if (model.name == 'turbo') ...[
                   const SizedBox(width: 8),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: cs.primary.withOpacity(0.12),
+                      color: cs.primary.withValues(alpha:0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text('recommended',
@@ -266,7 +266,7 @@ class _ModelCard extends StatelessWidget {
                   Text(
                     '${dlState!.pct}%  ${dlState!.speed.toStringAsFixed(1)} MB/s',
                     style: TextStyle(
-                        fontSize: 11, color: cs.onSurface.withOpacity(0.5)),
+                        fontSize: 11, color: cs.onSurface.withValues(alpha:0.5)),
                   ),
                 ],
               ),

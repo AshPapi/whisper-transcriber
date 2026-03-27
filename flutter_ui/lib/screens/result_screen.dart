@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -97,7 +98,7 @@ class _ResultScreenState extends State<ResultScreen> {
     );
     if (path == null) return;
 
-    await File(path).writeAsString(content, encoding: utf8Codec);
+    await File(path).writeAsString(content, encoding: utf8);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -105,8 +106,6 @@ class _ResultScreenState extends State<ResultScreen> {
       );
     }
   }
-
-  static const utf8Codec = SystemEncoding();
 
   @override
   Widget build(BuildContext context) {
@@ -162,7 +161,7 @@ class _ResultScreenState extends State<ResultScreen> {
           Text(
             '${filtered.length} segment${filtered.length == 1 ? '' : 's'}',
             style: TextStyle(
-                fontSize: 12, color: cs.onSurface.withOpacity(0.5)),
+                fontSize: 12, color: cs.onSurface.withValues(alpha:0.5)),
           ),
           const SizedBox(height: 8),
           Expanded(
@@ -262,7 +261,7 @@ class _SegmentTileState extends State<_SegmentTile> {
               '${widget.segment.startFormatted}\n${widget.segment.endFormatted}',
               style: TextStyle(
                   fontSize: 11,
-                  color: cs.onSurface.withOpacity(0.4),
+                  color: cs.onSurface.withValues(alpha:0.4),
                   height: 1.6,
                   fontFamily: 'monospace'),
             ),
@@ -327,7 +326,7 @@ class _SegmentTileState extends State<_SegmentTile> {
       spans.add(TextSpan(
         text: text.substring(idx, idx + query.length),
         style: TextStyle(
-            backgroundColor: cs.primary.withOpacity(0.25),
+            backgroundColor: cs.primary.withValues(alpha:0.25),
             color: cs.primary),
       ));
       start = idx + query.length;

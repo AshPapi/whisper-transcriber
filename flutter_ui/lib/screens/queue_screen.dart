@@ -38,7 +38,7 @@ class QueueScreen extends StatelessWidget {
                         color: Theme.of(context)
                             .colorScheme
                             .onSurface
-                            .withOpacity(0.3)),
+                            .withValues(alpha:0.3)),
                     const SizedBox(height: 12),
                     Text(
                       'No tasks yet',
@@ -46,7 +46,7 @@ class QueueScreen extends StatelessWidget {
                           color: Theme.of(context)
                               .colorScheme
                               .onSurface
-                              .withOpacity(0.4)),
+                              .withValues(alpha:0.4)),
                     ),
                   ],
                 ),
@@ -137,7 +137,7 @@ class _StatusIcon extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     switch (status) {
       case TaskStatus.queued:
-        return Icon(Icons.schedule_outlined, color: cs.onSurface.withOpacity(0.4));
+        return Icon(Icons.schedule_outlined, color: cs.onSurface.withValues(alpha:0.4));
       case TaskStatus.running:
         return SizedBox(
           width: 20,
@@ -149,7 +149,7 @@ class _StatusIcon extends StatelessWidget {
       case TaskStatus.error:
         return Icon(Icons.error_outline, color: cs.error);
       case TaskStatus.cancelled:
-        return Icon(Icons.cancel_outlined, color: cs.onSurface.withOpacity(0.4));
+        return Icon(Icons.cancel_outlined, color: cs.onSurface.withValues(alpha:0.4));
     }
   }
 }
@@ -161,7 +161,7 @@ class _StatusRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final style = TextStyle(fontSize: 12, color: cs.onSurface.withOpacity(0.5));
+    final style = TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha:0.5));
 
     switch (task.status) {
       case TaskStatus.queued:

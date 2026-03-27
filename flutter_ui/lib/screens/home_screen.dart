@@ -153,12 +153,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   border: Border.all(
                     color: _dragging
                         ? cs.primary
-                        : cs.outline.withOpacity(0.4),
+                        : cs.outline.withValues(alpha:0.4),
                     width: _dragging ? 2 : 1,
                   ),
                   borderRadius: BorderRadius.circular(12),
                   color: _dragging
-                      ? cs.primary.withOpacity(0.06)
+                      ? cs.primary.withValues(alpha:0.06)
                       : cs.surface,
                 ),
                 child: _files.isEmpty
@@ -208,15 +208,15 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_upload_outlined,
-                  size: 52, color: cs.primary.withOpacity(0.6)),
+                  size: 52, color: cs.primary.withValues(alpha:0.6)),
               const SizedBox(height: 12),
               Text('Drop files here or click to browse',
                   style: TextStyle(
-                      color: cs.onSurface.withOpacity(0.7), fontSize: 15)),
+                      color: cs.onSurface.withValues(alpha:0.7), fontSize: 15)),
               const SizedBox(height: 6),
               Text('Video & audio files supported',
                   style: TextStyle(
-                      color: cs.onSurface.withOpacity(0.4), fontSize: 12)),
+                      color: cs.onSurface.withValues(alpha:0.4), fontSize: 12)),
             ],
           ),
         ),
