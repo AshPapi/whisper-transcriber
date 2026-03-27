@@ -4,6 +4,7 @@
 
 import sys
 import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -107,7 +108,28 @@ def download_model(
         on_progress(bytes_done, total_size, speed)
 
     try:
-        urllib.request.urlretrieve(url, str(dest), reporthook=_reporthook)
+        import requests
+        with requests.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get('content-length', 0))
+            bytes_done = 0
+            block_size = 65536
+            import time
+            _start_time[0] = time.time()
+            with open(dest, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=block_size):
+                    if stop_event and stop_event.is_set():
+                        raise InterruptedError("download cancelled")
+                    if chunk:
+                        f.write(chunk)
+                        bytes_done += len(chunk)
+                        now = time.time()
+                        elapsed = now - _start_time[0]
+                        delta = bytes_done - _last_bytes[0]
+                        speed = (delta / elapsed / 1_048_576) if elapsed > 0 else 0.0
+                        _start_time[0] = now
+                        _last_bytes[0] = bytes_done
+                        on_progress(bytes_done, total_size, speed)
     except InterruptedError:
         if dest.exists():
             dest.unlink()

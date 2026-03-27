@@ -54,6 +54,8 @@ jobs:
             --collect-all tiktoken `
             --hidden-import static_ffmpeg `
             --collect-binaries static_ffmpeg `
+            --hidden-import requests `
+            --collect-all certifi `
             --noconfirm
 
       # ── Flutter UI → Windows release build ───────────────────────────────
