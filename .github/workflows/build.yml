@@ -27,7 +27,6 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
           pip install -r python_backend/requirements.txt
           pip install pyinstaller
 
@@ -95,31 +94,53 @@ jobs:
           # Rename Flutter exe to a friendly name for the user
           Rename-Item -Path "$out\whisper_transcriber.exe" -NewName "WhisperTranscriber.exe" -ErrorAction SilentlyContinue
 
-      - name: Zip release package
+      - name: Zip and split release package
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}"
           if (-not $version) { $version = "dev" }
           $zipName = "WhisperTranscriber-$version-Windows.zip"
           Compress-Archive -Path "release_pkg\*" -DestinationPath $zipName -Force
-          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+          # Split into 1.9 GB parts
+          $partSize = 1900MB
+          $zipBytes = [System.IO.File]::ReadAllBytes($zipName)
+          $totalSize = $zipBytes.Length
+          $partNum = 0
+          $offset = 0
+          $parts = @()
+          while ($offset -lt $totalSize) {
+            $partNum++
+            $end = [Math]::Min($offset + $partSize, $totalSize)
+            $chunk = $zipBytes[$offset..($end-1)]
+            $partName = "WhisperTranscriber-$version-Windows.part$partNum.zip"
+            [System.IO.File]::WriteAllBytes($partName, $chunk)
+            $parts += $partName
+            $offset = $end
+          }
+          echo "PARTS=$($parts -join ',')" >> $env:GITHUB_ENV
+          echo "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ env.ZIP_NAME }}
+          files: WhisperTranscriber-*-Windows.part*.zip
           name: Whisper Transcriber ${{ github.ref_name }}
           body: |
             ## Whisper Transcriber ${{ github.ref_name }}
 
             ### Установка
-            1. Скачай и распакуй ZIP
-            2. Запусти `WhisperTranscriber.exe`
+            1. Скачай **все части** (part1, part2 и т.д.)
+            2. Объедини части через 7-Zip: правой кнопкой на part1 → «Объединить файлы»
+            3. Распакуй полученный zip
+            4. Запусти `WhisperTranscriber.exe`
+
+            > Для объединения частей нужен [7-Zip](https://www.7-zip.org/)
 
             ### Что внутри
             - `WhisperTranscriber.exe` — основное приложение
-            - `backend.exe` — Python/Whisper backend (запускается автоматически, Python не нужен)
+            - `backend/backend.exe` — Python/Whisper backend (запускается автоматически)
 
             ### Требования
             - Windows 10/11 x64
