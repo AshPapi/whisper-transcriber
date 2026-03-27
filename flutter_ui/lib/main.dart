@@ -9,8 +9,10 @@ import 'theme/app_theme.dart';
 Process? _backendProcess;
 
 Future<void> _startBackend() async {
+  // If backend is already running (e.g. previous instance), reuse it
+  if (await BackendService.instance.isAlive()) return;
+
   final exeDir = p.dirname(Platform.resolvedExecutable);
-  // PyInstaller onedir: backend/backend.exe
   final backendExe = p.join(exeDir, 'backend', 'backend.exe');
   if (!File(backendExe).existsSync()) return;
   _backendProcess = await Process.start(

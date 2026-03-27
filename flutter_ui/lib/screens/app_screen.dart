@@ -28,13 +28,29 @@ class _AppScreenState extends State<AppScreen> {
   List<String> _files = [];
   bool _dragging = false;
 
+  // ── Static model list (always shown, download status loaded from backend) ──
+  static const _staticModels = [
+    ('tiny',     '~75 MB',   75),
+    ('base',     '~145 MB',  145),
+    ('small',    '~466 MB',  466),
+    ('medium',   '~1.5 GB',  1500),
+    ('large-v2', '~2.9 GB',  2900),
+    ('large-v3', '~2.9 GB',  2900),
+    ('turbo',    '~1.5 GB',  1500),
+  ];
+
   // ── Settings ──
-  List<WhisperModel> _allModels = [];
+  List<WhisperModel> _allModels = _buildStaticModels();
   String? _selectedModel;
   String _lang = 'auto';
   String _device = 'cpu';
   int _beam = 5;
   String _modelsDir = '';
+
+  static List<WhisperModel> _buildStaticModels() => _staticModels
+      .map((m) => WhisperModel(
+            name: m.$1, sizeLabel: m.$2, sizeMb: m.$3, downloaded: false))
+      .toList();
 
   // ── Tasks ──
   final List<TranscribeTask> _tasks = [];
@@ -77,13 +93,20 @@ class _AppScreenState extends State<AppScreen> {
   Future<void> _loadData() async {
     try {
       final settings = await _backend.getSettings();
+      if (mounted) {
+        setState(() {
+          _lang = settings.lang;
+          _beam = settings.beam;
+          _device = settings.device;
+          _modelsDir = settings.modelsDir;
+        });
+      }
+    } catch (_) {}
+
+    try {
       final models = await _backend.getModels();
       if (!mounted) return;
       setState(() {
-        _lang = settings.lang;
-        _beam = settings.beam;
-        _device = settings.device;
-        _modelsDir = settings.modelsDir;
         _allModels = models;
         final downloaded = models.where((m) => m.downloaded).toList();
         if (downloaded.isNotEmpty) {
@@ -435,6 +458,13 @@ class _AppScreenState extends State<AppScreen> {
         ],
       );
 
+  void _openModelsFolder() {
+    final dir = _modelsDir.isEmpty
+        ? '${Platform.environment['USERPROFILE'] ?? ''}\\whisper_models'
+        : _modelsDir;
+    Process.run('explorer', [dir]);
+  }
+
   Widget _buildModelsPath(ColorScheme cs) {
     return Row(
       children: [
@@ -450,18 +480,20 @@ class _AppScreenState extends State<AppScreen> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        InkWell(
+          onTap: _openModelsFolder,
+          borderRadius: BorderRadius.circular(4),
+          child: Tooltip(
+            message: 'Open folder',
+            child: Icon(Icons.open_in_new, size: 14,
+                color: cs.onSurface.withValues(alpha: 0.4)),
+          ),
+        ),
       ],
     );
   }
 
   Widget _buildModelsList(ColorScheme cs) {
-    if (_allModels.isEmpty) {
-      return TextButton.icon(
-        onPressed: _loadData,
-        icon: const Icon(Icons.refresh, size: 14),
-        label: const Text('Reload models', style: TextStyle(fontSize: 12)),
-      );
-    }
     return Column(
       children: _allModels.map((m) => _buildModelRow(m, cs)).toList(),
     );
