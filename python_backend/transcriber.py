@@ -94,8 +94,12 @@ class TranscribeWorker:
             if self._stop.is_set():
                 return
 
-            self.on_status(self.task_id, f"loading_model:{self.device.upper()}")
-            model = whisper.load_model(self.model_path, device=self.device)
+            import torch
+            device = self.device
+            if device == "cuda" and not torch.cuda.is_available():
+                device = "cpu"
+            self.on_status(self.task_id, f"loading_model:{device.upper()}")
+            model = whisper.load_model(self.model_path, device=device)
 
             if self._stop.is_set():
                 return
@@ -113,7 +117,7 @@ class TranscribeWorker:
             except Exception:
                 pass
 
-            fp16 = (self.device != "cpu")
+            fp16 = (device != "cpu")
             try:
                 result_data = model.transcribe(
                     tmp_path,
