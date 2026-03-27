@@ -100,6 +100,8 @@ class TranscribeWorker:
                 device = "cpu"
             self.on_status(self.task_id, f"loading_model:{device.upper()}")
             model = whisper.load_model(self.model_path, device=device)
+            if device == "cuda":
+                model = model.cuda()
 
             if self._stop.is_set():
                 return
