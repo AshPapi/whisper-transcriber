@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'models/models.dart';
 import 'screens/home_screen.dart';
 import 'screens/model_manager_screen.dart';
@@ -8,8 +10,28 @@ import 'screens/result_screen.dart';
 import 'services/backend_service.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Process? _backendProcess;
+
+Future<void> _startBackend() async {
+  // backend.exe sits next to the Flutter exe
+  final exeDir = p.dirname(Platform.resolvedExecutable);
+  final backendExe = p.join(exeDir, 'backend.exe');
+  if (!File(backendExe).existsSync()) return; // dev mode — backend started manually
+
+  _backendProcess = await Process.start(
+    backendExe,
+    [],
+    mode: ProcessStartMode.detachedWithStdio,
+  );
+}
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _startBackend();
+
+  // Give backend a moment to bind the port
+  await Future.delayed(const Duration(seconds: 2));
+
   BackendService.instance.connectWebSocket();
   runApp(const WhisperApp());
 }
@@ -76,6 +98,7 @@ class _MainShellState extends State<MainShell> {
   void dispose() {
     _eventSub?.cancel();
     _healthTimer?.cancel();
+    _backendProcess?.kill();
     super.dispose();
   }
 

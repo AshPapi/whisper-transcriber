@@ -86,13 +86,8 @@ jobs:
           # Python backend exe
           Copy-Item "python_backend\dist\backend.exe" "$out\" -Force
 
-          # Write launcher that starts backend.exe then the Flutter exe
-          $launcher = '@echo off
-          title Whisper Transcriber
-          start "" /min "%~dp0backend.exe"
-          timeout /t 3 /nobreak >nul
-          start "" "%~dp0whisper_transcriber.exe"'
-          Set-Content -Path "$out\WhisperTranscriber.bat" -Value $launcher -Encoding UTF8
+          # Rename Flutter exe to a friendly name for the user
+          Rename-Item -Path "$out\whisper_transcriber.exe" -NewName "WhisperTranscriber.exe" -ErrorAction SilentlyContinue
 
       - name: Zip release package
         shell: pwsh
@@ -114,12 +109,11 @@ jobs:
 
             ### Установка
             1. Скачай и распакуй ZIP
-            2. Запусти `WhisperTranscriber.bat`
+            2. Запусти `WhisperTranscriber.exe`
 
             ### Что внутри
-            - `whisper_transcriber.exe` — Flutter UI
-            - `backend.exe` — Python/Whisper backend (Python не нужен)
-            - `WhisperTranscriber.bat` — запускает оба
+            - `WhisperTranscriber.exe` — основное приложение
+            - `backend.exe` — Python/Whisper backend (запускается автоматически, Python не нужен)
 
             ### Требования
             - Windows 10/11 x64
