@@ -70,11 +70,11 @@ class _AppScreenState extends State<AppScreen> {
   };
 
   static const _languages = [
-    ('auto', 'Auto detect'), ('ru', 'Russian'), ('en', 'English'),
-    ('de', 'German'), ('fr', 'French'), ('es', 'Spanish'),
-    ('it', 'Italian'), ('zh', 'Chinese'), ('ja', 'Japanese'),
-    ('uk', 'Ukrainian'), ('pl', 'Polish'), ('pt', 'Portuguese'),
-    ('nl', 'Dutch'), ('tr', 'Turkish'), ('ar', 'Arabic'), ('ko', 'Korean'),
+    ('auto', 'Авто'), ('ru', 'Русский'), ('en', 'Английский'),
+    ('de', 'Немецкий'), ('fr', 'Французский'), ('es', 'Испанский'),
+    ('it', 'Итальянский'), ('zh', 'Китайский'), ('ja', 'Японский'),
+    ('uk', 'Украинский'), ('pl', 'Польский'), ('pt', 'Португальский'),
+    ('nl', 'Нидерландский'), ('tr', 'Турецкий'), ('ar', 'Арабский'), ('ko', 'Корейский'),
   ];
 
   @override
@@ -110,6 +110,28 @@ class _AppScreenState extends State<AppScreen> {
         _allModels = models;
         final downloaded = models.where((m) => m.downloaded).toList();
         if (downloaded.isNotEmpty) {
+          _selectedModel ??= downloaded
+              .firstWhere((m) => m.name == 'turbo',
+                  orElse: () => downloaded.first)
+              .name;
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadModelsOnly() async {
+    try {
+      final models = await _backend.getModels();
+      if (!mounted) return;
+      setState(() {
+        // Only update download status, don't touch active downloads
+        _allModels = models.map((m) {
+          // If currently downloading this model, keep it as not-downloaded in list
+          // (the dlState handles the UI, downloaded flag will update when done)
+          return m;
+        }).toList();
+        final downloaded = models.where((m) => m.downloaded).toList();
+        if (downloaded.isNotEmpty && _selectedModel == null) {
           _selectedModel = downloaded
               .firstWhere((m) => m.name == 'turbo',
                   orElse: () => downloaded.first)
@@ -159,7 +181,7 @@ class _AppScreenState extends State<AppScreen> {
           });
         case 'download_done':
           setState(() => _dlState.remove(name));
-          _loadData();
+          _loadModelsOnly();
         case 'download_cancelled':
         case 'download_error':
           setState(() => _dlState.remove(name));
@@ -231,11 +253,11 @@ class _AppScreenState extends State<AppScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete model?'),
-        content: Text('Remove "$name" from disk?'),
+        title: const Text('Удалить модель?'),
+        content: Text('Удалить "$name" с диска?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
         ],
       ),
     );
@@ -280,13 +302,13 @@ class _AppScreenState extends State<AppScreen> {
         const SizedBox(height: 16),
 
         // ── Transcription settings ──
-        _SectionLabel('Settings'),
+        _SectionLabel('Настройки'),
         const SizedBox(height: 8),
         _buildSettings(cs),
         const SizedBox(height: 16),
 
         // ── Models ──
-        _SectionLabel('Models'),
+        _SectionLabel('Модели'),
         const SizedBox(height: 4),
         _buildModelsPath(cs),
         const SizedBox(height: 8),
@@ -309,7 +331,7 @@ class _AppScreenState extends State<AppScreen> {
                   width: 16, height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.play_arrow_rounded),
-          label: Text(_transcribing ? 'Starting…' : 'Transcribe'),
+          label: Text(_transcribing ? 'Запуск…' : 'Транскрибировать'),
           style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 44)),
         ),
@@ -348,7 +370,7 @@ class _AppScreenState extends State<AppScreen> {
               Icon(Icons.cloud_upload_outlined,
                   size: 36, color: cs.primary.withValues(alpha: 0.6)),
               const SizedBox(height: 8),
-              Text('Drop files or click to browse',
+              Text('Перетащите файлы или нажмите для выбора',
                   style: TextStyle(
                       color: cs.onSurface.withValues(alpha: 0.6), fontSize: 13)),
             ],
@@ -382,7 +404,7 @@ class _AppScreenState extends State<AppScreen> {
           TextButton.icon(
             onPressed: _pickFiles,
             icon: const Icon(Icons.add, size: 14),
-            label: const Text('Add more', style: TextStyle(fontSize: 12)),
+            label: const Text('Добавить ещё', style: TextStyle(fontSize: 12)),
           ),
         ],
       );
@@ -396,14 +418,14 @@ class _AppScreenState extends State<AppScreen> {
                 child: DropdownButtonFormField<String>(
                   value: _selectedModel,
                   decoration: const InputDecoration(
-                      labelText: 'Model', isDense: true),
+                      labelText: 'Модель', isDense: true),
                   items: _allModels
                       .where((m) => m.downloaded)
                       .map((m) => DropdownMenuItem(
                           value: m.name, child: Text(m.name)))
                       .toList(),
                   onChanged: (v) => setState(() => _selectedModel = v),
-                  hint: const Text('No model',
+                  hint: const Text('Нет модели',
                       style: TextStyle(fontSize: 13)),
                 ),
               ),
@@ -417,7 +439,7 @@ class _AppScreenState extends State<AppScreen> {
                 child: DropdownButtonFormField<String>(
                   value: _lang,
                   decoration: const InputDecoration(
-                      labelText: 'Language', isDense: true),
+                      labelText: 'Язык', isDense: true),
                   items: _languages
                       .map((l) => DropdownMenuItem(
                           value: l.$1, child: Text(l.$2)))
@@ -431,7 +453,7 @@ class _AppScreenState extends State<AppScreen> {
                 child: DropdownButtonFormField<String>(
                   value: _device,
                   decoration: const InputDecoration(
-                      labelText: 'Device', isDense: true),
+                      labelText: 'Устройство', isDense: true),
                   items: const [
                     DropdownMenuItem(value: 'cpu', child: Text('CPU')),
                     DropdownMenuItem(value: 'cuda', child: Text('CUDA')),
@@ -445,7 +467,7 @@ class _AppScreenState extends State<AppScreen> {
                 child: TextFormField(
                   initialValue: _beam.toString(),
                   decoration: const InputDecoration(
-                      labelText: 'Beam', isDense: true),
+                      labelText: 'Beam size', isDense: true),
                   keyboardType: TextInputType.number,
                   onChanged: (v) {
                     final n = int.tryParse(v);
@@ -612,7 +634,7 @@ class _AppScreenState extends State<AppScreen> {
             Icon(Icons.mic_none_rounded,
                 size: 52, color: cs.onSurface.withValues(alpha: 0.2)),
             const SizedBox(height: 12),
-            Text('Add files and press Transcribe',
+            Text('Добавьте файлы и нажмите «Транскрибировать»',
                 style: TextStyle(
                     color: cs.onSurface.withValues(alpha: 0.4), fontSize: 14)),
           ],
@@ -628,6 +650,7 @@ class _AppScreenState extends State<AppScreen> {
         task: _tasks[i],
         onView: () => setState(() => _viewingTask = _tasks[i]),
         onCancel: () => _backend.cancelTask(_tasks[i].taskId),
+        onDelete: () => setState(() => _tasks.removeAt(i)),
       ),
     );
   }
@@ -641,9 +664,10 @@ class _TaskCard extends StatelessWidget {
   final TranscribeTask task;
   final VoidCallback onView;
   final VoidCallback onCancel;
+  final VoidCallback onDelete;
 
   const _TaskCard(
-      {required this.task, required this.onView, required this.onCancel});
+      {required this.task, required this.onView, required this.onCancel, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -669,6 +693,7 @@ class _TaskCard extends StatelessWidget {
                   if (task.isActive) ...[
                     const SizedBox(height: 6),
                     LinearProgressIndicator(
+                      value: _transcribeProgress(task.statusText),
                       borderRadius: BorderRadius.circular(3),
                     ),
                   ],
@@ -676,18 +701,36 @@ class _TaskCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            if (task.status == TaskStatus.done)
+            if (task.status == TaskStatus.done) ...[
               FilledButton.tonal(
-                  onPressed: onView, child: const Text('View'))
-            else if (task.isActive)
+                  onPressed: onView, child: const Text('Открыть')),
+              const SizedBox(width: 4),
+              IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  tooltip: 'Удалить',
+                  onPressed: onDelete),
+            ] else if (task.isActive)
               IconButton(
                   icon: const Icon(Icons.stop_circle_outlined),
-                  tooltip: 'Cancel',
-                  onPressed: onCancel),
+                  tooltip: 'Отмена',
+                  onPressed: onCancel)
+            else
+              IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  tooltip: 'Удалить',
+                  onPressed: onDelete),
           ],
         ),
       ),
     );
+  }
+
+  double? _transcribeProgress(String s) {
+    if (s.startsWith('transcribing:')) {
+      final pct = int.tryParse(s.split(':').last) ?? 0;
+      return pct > 0 ? pct / 100.0 : null;
+    }
+    return null;
   }
 
   Widget _statusIcon(ColorScheme cs) {
@@ -713,26 +756,30 @@ class _TaskCard extends StatelessWidget {
     final style =
         TextStyle(fontSize: 11, color: cs.onSurface.withValues(alpha: 0.5));
     return switch (task.status) {
-      TaskStatus.queued => Text('Waiting…', style: style),
+      TaskStatus.queued => Text('В очереди…', style: style),
       TaskStatus.running => Text(_translateStatus(task.statusText),
           style: style.copyWith(color: cs.primary)),
       TaskStatus.done =>
-        Text('${task.segments.length} segments', style: style),
-      TaskStatus.error => Text(task.error ?? 'Error',
+        Text('${task.segments.length} сегментов', style: style),
+      TaskStatus.error => Text(task.error ?? 'Ошибка',
           style: style.copyWith(color: cs.error),
           overflow: TextOverflow.ellipsis),
-      TaskStatus.cancelled => Text('Cancelled', style: style),
+      TaskStatus.cancelled => Text('Отменено', style: style),
     };
   }
 
   String _translateStatus(String s) {
     if (s.startsWith('loading_model:')) {
-      return 'Loading model on ${s.split(':').last}…';
+      return 'Загрузка модели (${s.split(':').last})…';
+    }
+    if (s.startsWith('transcribing:')) {
+      final pct = s.split(':').last;
+      return pct == '0' ? 'Транскрибация…' : 'Транскрибация $pct%…';
     }
     return switch (s) {
-      'extracting_audio' => 'Extracting audio…',
-      'converting_audio' => 'Converting audio…',
-      'transcribing' => 'Transcribing…',
+      'extracting_audio' => 'Извлечение аудио…',
+      'converting_audio' => 'Конвертация аудио…',
+      'transcribing' => 'Транскрибация…',
       _ => s,
     };
   }
@@ -797,7 +844,9 @@ class _ResultViewState extends State<_ResultView> {
     return sb.toString();
   }
 
-  String _toTxt() => _segments.map((s) => s.text).join('\n');
+  String _toTxt() => _segments
+      .map((s) => '[${s.startFormatted} - ${s.endFormatted}] ${s.text}')
+      .join('\n');
 
   static String _srtTime(double s) {
     final ms = ((s % 1) * 1000).toInt();
@@ -829,7 +878,7 @@ class _ResultViewState extends State<_ResultView> {
     await File(path).writeAsString(content, encoding: utf8);
     if (mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Saved to $path')));
+          .showSnackBar(SnackBar(content: Text('Сохранено: $path')));
     }
   }
 
@@ -866,7 +915,7 @@ class _ResultViewState extends State<_ResultView> {
           child: TextField(
             controller: _searchCtrl,
             decoration: InputDecoration(
-              hintText: 'Search…',
+              hintText: 'Поиск…',
               prefixIcon: const Icon(Icons.search, size: 18),
               isDense: true,
               suffixIcon: _query.isNotEmpty
@@ -881,7 +930,7 @@ class _ResultViewState extends State<_ResultView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Text('${filtered.length} segments',
+            child: Text('${filtered.length} сегментов',
                 style: TextStyle(
                     fontSize: 11,
                     color: cs.onSurface.withValues(alpha: 0.4))),
@@ -899,7 +948,7 @@ class _ResultViewState extends State<_ResultView> {
               onCopy: () {
                 Clipboard.setData(ClipboardData(text: filtered[i].text));
                 ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                    content: Text('Copied'),
+                    content: Text('Скопировано'),
                     duration: Duration(seconds: 1)));
               },
               onChanged: (t) => setState(() => filtered[i].text = t),

@@ -100,23 +100,42 @@ class TranscribeWorker:
             if self._stop.is_set():
                 return
 
-            self.on_status(self.task_id, "transcribing")
+            self.on_status(self.task_id, "transcribing:0")
 
             all_segments = []
 
-            def _progress_callback(seek, total):
-                if self._stop.is_set():
-                    raise InterruptedError("stopped")
+            # Get duration for progress calculation
+            import wave, contextlib
+            duration = 0.0
+            try:
+                with contextlib.closing(wave.open(tmp_path, 'r')) as f:
+                    duration = f.getnframes() / float(f.getframerate())
+            except Exception:
+                pass
 
-            result_data = model.transcribe(
-                tmp_path,
-                language=self.language,
-                beam_size=self.beam_size,
-                fp16=(self.device != "cpu"),
-                verbose=False,
-            )
+            fp16 = (self.device != "cpu")
+            try:
+                result_data = model.transcribe(
+                    tmp_path,
+                    language=self.language,
+                    beam_size=self.beam_size,
+                    fp16=fp16,
+                    verbose=False,
+                )
+            except RuntimeError as e:
+                if "CUDA" in str(e) or "fp16" in str(e).lower():
+                    result_data = model.transcribe(
+                        tmp_path,
+                        language=self.language,
+                        beam_size=self.beam_size,
+                        fp16=False,
+                        verbose=False,
+                    )
+                else:
+                    raise
 
-            for seg in result_data["segments"]:
+            total_segs = len(result_data["segments"])
+            for i, seg in enumerate(result_data["segments"]):
                 if self._stop.is_set():
                     break
                 segment = {
@@ -127,6 +146,8 @@ class TranscribeWorker:
                 }
                 all_segments.append(segment)
                 self.on_segment(self.task_id, segment)
+                pct = int((i + 1) * 100 / total_segs) if total_segs > 0 else 0
+                self.on_status(self.task_id, f"transcribing:{pct}")
 
             if not self._stop.is_set():
                 self.on_finished(self.task_id, all_segments)

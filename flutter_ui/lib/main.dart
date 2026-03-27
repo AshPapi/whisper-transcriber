@@ -50,7 +50,7 @@ class _WhisperAppState extends State<WhisperApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Whisper Transcriber',
+        title: 'Whisper Транскрибатор',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
@@ -108,11 +108,11 @@ class _ShellState extends State<_Shell> {
         title: Row(children: [
           Icon(Icons.mic_rounded, color: cs.primary, size: 20),
           const SizedBox(width: 8),
-          const Text('Whisper Transcriber'),
+          const Text('Whisper Транскрибатор'),
         ]),
         actions: [
           Tooltip(
-            message: _alive ? 'Backend online' : 'Backend offline',
+            message: _alive ? 'Бэкенд работает' : 'Бэкенд недоступен',
             child: Icon(Icons.circle,
                 size: 9, color: _alive ? Colors.green : Colors.red),
           ),
@@ -134,9 +134,9 @@ class _ShellState extends State<_Shell> {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 20),
-            const Text('Starting backend…', style: TextStyle(fontSize: 15)),
+            const Text('Запуск бэкенда…', style: TextStyle(fontSize: 15)),
             const SizedBox(height: 8),
-            Text('First launch may take up to a minute',
+            Text('Первый запуск может занять до минуты',
                 style: TextStyle(
                     fontSize: 12,
                     color: cs.onSurface.withValues(alpha: 0.5))),
