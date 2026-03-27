@@ -82,7 +82,7 @@ class _ShellState extends State<_Shell> {
     super.initState();
     _waitForBackend().then((_) {
       if (!mounted) return;
-      setState(() => _ready = true);
+      setState(() { _ready = true; _alive = true; });
       BackendService.instance.connectWebSocket();
       _healthTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
         final alive = await BackendService.instance.isAlive();
