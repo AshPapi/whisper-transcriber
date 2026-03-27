@@ -57,6 +57,7 @@ jobs:
             --collect-binaries static_ffmpeg `
             --hidden-import requests `
             --collect-all certifi `
+            --collect-all torch `
             --noconfirm
 
       # ── Flutter UI → Windows release build ───────────────────────────────
