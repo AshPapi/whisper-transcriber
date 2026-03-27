@@ -41,7 +41,9 @@ WHISPER_MODELS = [
     ("base",     "~145 MB"),
     ("small",    "~466 MB"),
     ("medium",   "~1.5 GB"),
-    ("large-v3", "~3 GB"),
+    ("large-v2", "~2.9 GB"),
+    ("large-v3", "~2.9 GB"),
+    ("turbo",    "~1.5 GB"),
 ]
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v"}
@@ -88,19 +90,13 @@ def scan_models(models_dir: str) -> list:
     p = Path(models_dir)
     if not p.exists():
         return []
-    found = []
-    for item in sorted(p.iterdir()):
-        if item.is_dir() and (item / "model.bin").exists():
-            found.append((item.name, str(item)))
-    for item in sorted(p.glob("*.bin")):
-        found.append((item.stem, str(item)))
-    return found
+    return [(item.stem, str(item)) for item in sorted(p.glob("*.pt"))]
 
 
 def _default_device() -> str:
     try:
-        import ctranslate2
-        if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
+        import torch
+        if torch.cuda.is_available():
             return "cuda"
     except Exception:
         pass
@@ -124,10 +120,9 @@ class TranscribeWorker:
         self._stop.set()
 
     def run(self):
-        import soundfile as sf
         tmp_file = None
         try:
-            from faster_whisper import WhisperModel
+            import whisper
 
             suffix = Path(self.audio_path).suffix.lower()
             self.on_progress(
@@ -149,30 +144,30 @@ class TranscribeWorker:
                 return
 
             self.on_progress(f"загрузка модели · {self.device.upper()}...")
-            compute_type = "float16" if self.device == "cuda" else "int8"
-            model = WhisperModel(self.model_path, device=self.device, compute_type=compute_type)
+            model = whisper.load_model(self.model_path, device=self.device)
 
             if self._stop.is_set():
                 return
 
-            audio_array, _ = sf.read(tmp_path, dtype="float32")
-
             self.on_progress("транскрибация...")
-            segments, info = model.transcribe(
-                audio_array,
+            result_data = model.transcribe(
+                tmp_path,
                 language=self.language,
                 beam_size=self.beam_size,
-                vad_filter=True,
+                fp16=(self.device != "cpu"),
+                verbose=False,
             )
 
             lines = []
-            for seg in segments:
+            for seg in result_data["segments"]:
                 if self._stop.is_set():
                     break
-                lines.append(f"[{fmt_time(seg.start)} → {fmt_time(seg.end)}]  {seg.text.strip()}")
+                lines.append(f"[{fmt_time(seg['start'])} → {fmt_time(seg['end'])}]  {seg['text'].strip()}")
 
             if not self._stop.is_set():
-                self.on_finished("\n".join(lines), info.duration)
+                segs = result_data["segments"]
+                duration = segs[-1]["end"] if segs else 0.0
+                self.on_finished("\n".join(lines), duration)
 
         except Exception as e:
             import traceback
@@ -337,15 +332,43 @@ async def main(page: ft.Page):
     )
 
     def _do_download(model_name: str, dest_dir: str):
+        import urllib.request
         try:
-            from huggingface_hub import snapshot_download
-            repo_id = f"Systran/faster-whisper-{model_name}"
-            local_dir = str(Path(dest_dir) / f"faster-whisper-{model_name}")
+            import whisper as _w
+        except ImportError:
+            dl_status_lbl.value = "Установите: pip install openai-whisper"
+            page.update()
+            return
+
+        url = _w._MODELS.get(model_name)
+        if not url:
+            dl_status_lbl.value = f"неизвестная модель: {model_name}"
+            page.update()
+            return
+
+        dest_path = Path(dest_dir) / f"{model_name}.pt"
+        if dest_path.exists():
+            dl_status_lbl.value = f"✓ {model_name} уже скачана"
+            dl_status_lbl.color = "#16a34a"
+            dl_btn_start.disabled = False
+            page.update()
+            _scan_models()
+            return
+
+        def _reporthook(count, block_size, total_size):
+            if total_size > 0:
+                pct = min(1.0, count * block_size / total_size)
+                dl_progress.value = pct
+                dl_status_lbl.value = f"скачивание {model_name}… {int(pct * 100)}%"
+                page.update()
+
+        try:
             dl_status_lbl.value = f"скачивание {model_name}…"
             dl_progress.visible = True
+            dl_progress.value = 0
             dl_btn_start.disabled = True
             page.update()
-            snapshot_download(repo_id=repo_id, local_dir=local_dir)
+            urllib.request.urlretrieve(url, str(dest_path), reporthook=_reporthook)
             dl_status_lbl.value = f"✓ {model_name} скачана"
             dl_status_lbl.color = "#16a34a"
             dl_progress.visible = False
@@ -353,6 +376,8 @@ async def main(page: ft.Page):
             page.update()
             _scan_models()
         except Exception as ex:
+            if dest_path.exists():
+                dest_path.unlink()
             dl_status_lbl.value = f"ошибка: {ex}"
             dl_progress.visible = False
             dl_btn_start.disabled = False
