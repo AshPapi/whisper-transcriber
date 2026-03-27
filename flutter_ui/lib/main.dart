@@ -10,10 +10,12 @@ Process? _backendProcess;
 
 Future<void> _startBackend() async {
   final exeDir = p.dirname(Platform.resolvedExecutable);
-  final backendExe = p.join(exeDir, 'backend.exe');
+  // PyInstaller onedir: backend/backend.exe
+  final backendExe = p.join(exeDir, 'backend', 'backend.exe');
   if (!File(backendExe).existsSync()) return;
   _backendProcess = await Process.start(
     backendExe, [],
+    workingDirectory: p.dirname(backendExe),
     mode: ProcessStartMode.detachedWithStdio,
   );
 }
