@@ -38,7 +38,13 @@
       "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://127.0.0.1:8765/settings'' -TimeoutSec 3\")",
       "Bash(powershell -Command \"Get-Content ''$env:USERPROFILE\\\\.whisper_transcriber.json''\")",
       "Bash(powershell -Command \"Get-Content \"\"$env:USERPROFILE\\\\.whisper_transcriber.json\"\"\")",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "Bash(pip list:*)",
+      "Bash(pip install:*)",
+      "Bash(timeout 5 python server.py)",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"from server import app; print\\(''Backend OK''\\)\")",
+      "Bash(python test_fixes.py)"
     ]
   }
 }
