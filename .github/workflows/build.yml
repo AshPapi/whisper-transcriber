@@ -103,23 +103,25 @@ jobs:
           $zipName = "WhisperTranscriber-$version-Windows.zip"
           Compress-Archive -Path "release_pkg\*" -DestinationPath $zipName -Force
 
-          # Split into 1.9 GB parts
-          $partSize = 1900MB
-          $zipBytes = [System.IO.File]::ReadAllBytes($zipName)
-          $totalSize = $zipBytes.Length
+          # Split into 1.9 GB parts using streams
+          $partSize = 1900 * 1024 * 1024
+          $buffer = New-Object byte[] (4 * 1024 * 1024)
+          $reader = [System.IO.File]::OpenRead($zipName)
           $partNum = 0
-          $offset = 0
-          $parts = @()
-          while ($offset -lt $totalSize) {
+          while ($reader.Position -lt $reader.Length) {
             $partNum++
-            $end = [Math]::Min($offset + $partSize, $totalSize)
-            $chunk = $zipBytes[$offset..($end-1)]
             $partName = "WhisperTranscriber-$version-Windows.part$partNum.zip"
-            [System.IO.File]::WriteAllBytes($partName, $chunk)
-            $parts += $partName
-            $offset = $end
+            $writer = [System.IO.File]::OpenWrite($partName)
+            $written = 0
+            while ($written -lt $partSize -and $reader.Position -lt $reader.Length) {
+              $toRead = [Math]::Min($buffer.Length, $partSize - $written)
+              $read = $reader.Read($buffer, 0, $toRead)
+              $writer.Write($buffer, 0, $read)
+              $written += $read
+            }
+            $writer.Close()
           }
-          echo "PARTS=$($parts -join ',')" >> $env:GITHUB_ENV
+          $reader.Close()
           echo "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
