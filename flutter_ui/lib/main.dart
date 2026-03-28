@@ -40,8 +40,9 @@ Future<void> _startBackend() async {
   final exeDir = p.dirname(Platform.resolvedExecutable);
   final backendExe = p.join(exeDir, 'backend', 'backend.exe');
   if (!File(backendExe).existsSync()) return;
+  // Pass our PID so backend can exit when Flutter closes
   _backendProcess = await Process.start(
-    backendExe, [],
+    backendExe, [pid.toString()],
     workingDirectory: p.dirname(backendExe),
     mode: ProcessStartMode.normal,
   );

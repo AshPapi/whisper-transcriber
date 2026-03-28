@@ -392,10 +392,21 @@ def update_settings(req: SettingsUpdate):
     return get_settings()
 
 
+def _watch_parent(parent_pid: int):
+    """Exit when the parent Flutter process dies."""
+    import psutil, time, os, sys
+    while True:
+        time.sleep(3)
+        if not psutil.pid_exists(parent_pid):
+            log.info("Parent process %d died, shutting down backend", parent_pid)
+            os._exit(0)
+
+
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()  # required for PyInstaller on Windows
     import uvicorn
+    import sys
 
     log_file = Path.home() / "whisper_backend.log"
     logging.basicConfig(
@@ -407,5 +418,15 @@ if __name__ == "__main__":
         ],
     )
     logging.getLogger("whisper-backend").info("Backend starting, log: %s", log_file)
+
+    # Watch parent Flutter process and exit when it dies
+    if len(sys.argv) > 1:
+        try:
+            parent_pid = int(sys.argv[1])
+            t = threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True)
+            t.start()
+            log.info("Watching parent PID %d", parent_pid)
+        except ValueError:
+            pass
 
     uvicorn.run(app, host="127.0.0.1", port=8765, reload=False, log_level="info")
