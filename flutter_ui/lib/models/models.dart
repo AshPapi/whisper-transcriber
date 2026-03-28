@@ -72,6 +72,9 @@ class TranscribeTask {
   final String taskId;
   final String file;
   final String model;
+  final String device;
+  final String language;
+  final int beamSize;
   TaskStatus status;
   String statusText;
   List<Segment> segments;
@@ -81,6 +84,9 @@ class TranscribeTask {
     required this.taskId,
     required this.file,
     required this.model,
+    this.device = '',
+    this.language = 'auto',
+    this.beamSize = 5,
     this.status = TaskStatus.queued,
     this.statusText = '',
     List<Segment>? segments,

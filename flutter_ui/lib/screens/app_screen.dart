@@ -6,6 +6,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../models/models.dart';
 import '../services/backend_service.dart';
@@ -69,6 +70,8 @@ class _AppScreenState extends State<AppScreen> {
   bool _transcribing = false;
   String? _error;
   StreamSubscription? _eventSub;
+
+  bool get _hasActiveTask => _tasks.any((t) => t.isActive);
 
   static const _supportedExt = {
     'mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'wma', 'opus',
@@ -177,6 +180,14 @@ class _AppScreenState extends State<AppScreen> {
 
   void _onEvent(Map<String, dynamic> event) {
     if (!mounted) return;
+    try {
+      _handleEvent(event);
+    } catch (e) {
+      debugPrint('Event handling error: $e');
+    }
+  }
+
+  void _handleEvent(Map<String, dynamic> event) {
     final type = event['type'] as String?;
 
     // ── Transcription events ──
@@ -238,34 +249,46 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   void _addFiles(List<String> paths) {
+    if (_hasActiveTask) return;
     final valid = paths.where((filePath) {
-      final ext = filePath.split('.').last.toLowerCase();
-      return _supportedExt.contains(ext);
+      final ext = p.extension(filePath).replaceFirst('.', '').toLowerCase();
+      return ext.isNotEmpty && _supportedExt.contains(ext);
     }).toList();
     if (valid.isEmpty) return;
     setState(() => _files = [..._files, ...valid]);
   }
 
   Future<void> _pickFiles() async {
+    if (_hasActiveTask) return;
     final result =
         await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.any);
-    if (result != null) _addFiles(result.files.map((f) => f.path!).toList());
+    if (result != null) _addFiles(result.files.where((f) => f.path != null).map((f) => f.path!).toList());
   }
 
   Future<void> _startTranscribe() async {
     if (_files.isEmpty || _selectedModel == null) return;
+    final filesToTranscribe = List<String>.from(_files);
     setState(() { _transcribing = true; _error = null; });
     try {
+      final deviceName = _devices.firstWhere(
+        (d) => d['id'] == _device,
+        orElse: () => {'id': _device, 'name': _device},
+      )['name'] ?? _device;
       final ids = await _backend.transcribe(
-        files: _files,
+        files: filesToTranscribe,
         modelName: _selectedModel!,
         language: _lang,
         beamSize: _beam,
         device: _device,
       );
       setState(() {
-        for (var i = 0; i < ids.length; i++) {
-          _tasks.insert(0, TranscribeTask(taskId: ids[i], file: _files[i], model: _selectedModel!));
+        final count = ids.length < filesToTranscribe.length ? ids.length : filesToTranscribe.length;
+        for (var i = 0; i < count; i++) {
+          _tasks.insert(0, TranscribeTask(
+            taskId: ids[i], file: filesToTranscribe[i], model: _selectedModel!,
+            device: deviceName,
+            language: _lang, beamSize: _beam,
+          ));
         }
         _files = [];
       });
@@ -366,7 +389,7 @@ class _AppScreenState extends State<AppScreen> {
 
         // ── Transcribe button ──
         FilledButton.icon(
-          onPressed: (_files.isEmpty || _selectedModel == null || _transcribing)
+          onPressed: (_files.isEmpty || _selectedModel == null || _transcribing || _hasActiveTask)
               ? null
               : _startTranscribe,
           icon: _transcribing
@@ -374,7 +397,7 @@ class _AppScreenState extends State<AppScreen> {
                   width: 16, height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.play_arrow_rounded),
-          label: Text(_transcribing ? 'Запуск…' : 'Транскрибировать'),
+          label: Text(_hasActiveTask ? 'Дождитесь завершения' : (_transcribing ? 'Запуск…' : 'Транскрибировать')),
           style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 44)),
         ),
@@ -383,22 +406,29 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   Widget _buildDropZone(ColorScheme cs) {
-    return DropTarget(
-      onDragDone: (d) => _addFiles(d.files.map((f) => f.path).toList()),
-      onDragEntered: (_) => setState(() => _dragging = true),
-      onDragExited: (_) => setState(() => _dragging = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        height: 130,
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: _dragging ? cs.primary : cs.outline.withValues(alpha: 0.4),
-            width: _dragging ? 2 : 1,
+    final blocked = _hasActiveTask;
+    return IgnorePointer(
+      ignoring: blocked,
+      child: Opacity(
+        opacity: blocked ? 0.4 : 1.0,
+        child: DropTarget(
+          onDragDone: (d) => _addFiles(d.files.map((f) => f.path).toList()),
+          onDragEntered: (_) => setState(() => _dragging = true),
+          onDragExited: (_) => setState(() => _dragging = false),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            height: 130,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: _dragging ? cs.primary : cs.outline.withValues(alpha:0.4),
+                width: _dragging ? 2 : 1,
+              ),
+              borderRadius: BorderRadius.circular(10),
+              color: _dragging ? cs.primary.withValues(alpha:0.06) : cs.surface,
+            ),
+            child: _files.isEmpty ? _buildDropHint(cs) : _buildFileList(cs),
           ),
-          borderRadius: BorderRadius.circular(10),
-          color: _dragging ? cs.primary.withValues(alpha: 0.06) : cs.surface,
         ),
-        child: _files.isEmpty ? _buildDropHint(cs) : _buildFileList(cs),
       ),
     );
   }
@@ -411,11 +441,11 @@ class _AppScreenState extends State<AppScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_upload_outlined,
-                  size: 36, color: cs.primary.withValues(alpha: 0.6)),
+                  size: 36, color: cs.primary.withValues(alpha:0.6)),
               const SizedBox(height: 8),
               Text('Перетащите файлы или нажмите для выбора',
                   style: TextStyle(
-                      color: cs.onSurface.withValues(alpha: 0.6), fontSize: 13)),
+                      color: cs.onSurface.withValues(alpha:0.6), fontSize: 13)),
             ],
           ),
         ),
@@ -458,23 +488,29 @@ class _AppScreenState extends State<AppScreen> {
           Row(
             children: [
               Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _selectedModel,
-                  decoration: const InputDecoration(
-                      labelText: 'Модель', isDense: true),
-                  items: _allModels
+                child: Builder(builder: (context) {
+                  final downloaded = _allModels
                       .where((m) => m.downloaded)
                       .fold<List<WhisperModel>>([], (acc, m) {
                         if (!acc.any((x) => x.name == m.name)) acc.add(m);
                         return acc;
-                      })
-                      .map((m) => DropdownMenuItem(
-                          value: m.name, child: Text(m.name)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _selectedModel = v),
-                  hint: const Text('Нет модели',
-                      style: TextStyle(fontSize: 13)),
-                ),
+                      });
+                  final validValue = downloaded.any((m) => m.name == _selectedModel)
+                      ? _selectedModel
+                      : null;
+                  return DropdownButtonFormField<String>(
+                    value: validValue,
+                    decoration: const InputDecoration(
+                        labelText: 'Модель', isDense: true),
+                    items: downloaded
+                        .map((m) => DropdownMenuItem(
+                            value: m.name, child: Text(m.name)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedModel = v),
+                    hint: const Text('Нет модели',
+                        style: TextStyle(fontSize: 13)),
+                  );
+                }),
               ),
             ],
           ),
@@ -490,9 +526,14 @@ class _AppScreenState extends State<AppScreen> {
                       .map((l) => DropdownMenuItem(
                           value: l.$1, child: Text(l.$2)))
                       .toList(),
-                  onChanged: (v) {
+                  onChanged: (v) async {
+                    final prev = _lang;
                     setState(() => _lang = v!);
-                    _backend.updateSettings({'lang': v});
+                    try {
+                      await _backend.updateSettings({'lang': v});
+                    } catch (_) {
+                      if (mounted) setState(() => _lang = prev);
+                    }
                   },
                   isExpanded: true,
                 ),
@@ -501,15 +542,21 @@ class _AppScreenState extends State<AppScreen> {
               SizedBox(
                 width: 55,
                 child: TextFormField(
+                  key: ValueKey('beam_$_beam'),
                   initialValue: _beam.toString(),
                   decoration: const InputDecoration(
                       labelText: 'Beam', isDense: true),
                   keyboardType: TextInputType.number,
-                  onChanged: (v) {
+                  onChanged: (v) async {
                     final n = int.tryParse(v);
-                    if (n != null && n >= 1) {
+                    if (n != null && n >= 1 && n <= 10) {
+                      final prev = _beam;
                       setState(() => _beam = n);
-                      _backend.updateSettings({'beam': n});
+                      try {
+                        await _backend.updateSettings({'beam': n});
+                      } catch (_) {
+                        if (mounted) setState(() => _beam = prev);
+                      }
                     }
                   },
                 ),
@@ -525,9 +572,14 @@ class _AppScreenState extends State<AppScreen> {
                 .map((d) => DropdownMenuItem(
                     value: d['id'], child: Text(d['name']!, overflow: TextOverflow.ellipsis)))
                 .toList(),
-            onChanged: (v) {
+            onChanged: (v) async {
+              final prev = _device;
               setState(() => _device = v!);
-              _backend.updateSettings({'device': v});
+              try {
+                await _backend.updateSettings({'device': v});
+              } catch (_) {
+                if (mounted) setState(() => _device = prev);
+              }
             },
             isExpanded: true,
           ),
@@ -536,25 +588,30 @@ class _AppScreenState extends State<AppScreen> {
 
   void _openModelsFolder() {
     final dir = _modelsDir.isEmpty
-        ? '${Platform.environment['USERPROFILE'] ?? ''}\\whisper_models'
+        ? p.join(Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '', 'whisper_models')
         : _modelsDir;
-    // Create directory if it doesn't exist so Explorer opens it (not Documents)
     Directory(dir).createSync(recursive: true);
-    Process.run('explorer', [dir]);
+    if (Platform.isWindows) {
+      Process.run('explorer', [dir]);
+    } else if (Platform.isMacOS) {
+      Process.run('open', [dir]);
+    } else {
+      Process.run('xdg-open', [dir]);
+    }
   }
 
   Widget _buildModelsPath(ColorScheme cs) {
     return Row(
       children: [
         Icon(Icons.folder_outlined, size: 14,
-            color: cs.onSurface.withValues(alpha: 0.5)),
+            color: cs.onSurface.withValues(alpha:0.5)),
         const SizedBox(width: 4),
         Expanded(
           child: Text(
             _modelsDir.isEmpty ? '~/whisper_models' : _modelsDir,
             style: TextStyle(
                 fontSize: 11,
-                color: cs.onSurface.withValues(alpha: 0.5)),
+                color: cs.onSurface.withValues(alpha:0.5)),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -564,7 +621,7 @@ class _AppScreenState extends State<AppScreen> {
           child: Tooltip(
             message: 'Открыть папку',
             child: Icon(Icons.open_in_new, size: 14,
-                color: cs.onSurface.withValues(alpha: 0.4)),
+                color: cs.onSurface.withValues(alpha:0.4)),
           ),
         ),
       ],
@@ -595,7 +652,7 @@ class _AppScreenState extends State<AppScreen> {
                 size: 14,
                 color: m.downloaded
                     ? Colors.green.shade600
-                    : cs.onSurface.withValues(alpha: 0.35),
+                    : cs.onSurface.withValues(alpha:0.35),
               ),
               const SizedBox(width: 6),
               Text(m.name,
@@ -608,7 +665,7 @@ class _AppScreenState extends State<AppScreen> {
               Text(m.sizeLabel,
                   style: TextStyle(
                       fontSize: 11,
-                      color: cs.onSurface.withValues(alpha: 0.4))),
+                      color: cs.onSurface.withValues(alpha:0.4))),
               if (m.name == 'turbo') ...[
                 const SizedBox(width: 4),
                 Text('rec',
@@ -633,7 +690,7 @@ class _AppScreenState extends State<AppScreen> {
                   onTap: () => _deleteModel(m.name),
                   borderRadius: BorderRadius.circular(4),
                   child: Icon(Icons.delete_outline, size: 16,
-                      color: cs.onSurface.withValues(alpha: 0.4)),
+                      color: cs.onSurface.withValues(alpha:0.4)),
                 )
               else
                 InkWell(
@@ -660,7 +717,7 @@ class _AppScreenState extends State<AppScreen> {
                 Text('${dl.pct}% · ${dl.speed.toStringAsFixed(1)} MB/s',
                     style: TextStyle(
                         fontSize: 10,
-                        color: cs.onSurface.withValues(alpha: 0.5))),
+                        color: cs.onSurface.withValues(alpha:0.5))),
               ],
             ),
           ],
@@ -690,11 +747,11 @@ class _AppScreenState extends State<AppScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.mic_none_rounded,
-                size: 52, color: cs.onSurface.withValues(alpha: 0.2)),
+                size: 52, color: cs.onSurface.withValues(alpha:0.2)),
             const SizedBox(height: 12),
             Text('Добавьте файлы и нажмите «Транскрибировать»',
                 style: TextStyle(
-                    color: cs.onSurface.withValues(alpha: 0.4), fontSize: 14)),
+                    color: cs.onSurface.withValues(alpha:0.4), fontSize: 14)),
           ],
         ),
       );
@@ -705,6 +762,7 @@ class _AppScreenState extends State<AppScreen> {
       itemCount: _tasks.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (ctx, i) => _TaskCard(
+        key: ValueKey(_tasks[i].taskId),
         task: _tasks[i],
         onView: () => setState(() => _viewingTask = _tasks[i]),
         onCancel: () async {
@@ -715,7 +773,10 @@ class _AppScreenState extends State<AppScreen> {
             // Task may already be done/errored on backend — UI already updated
           }
         },
-        onDelete: () => setState(() => _tasks.removeAt(i)),
+        onDelete: () => setState(() {
+          if (_viewingTask?.taskId == _tasks[i].taskId) _viewingTask = null;
+          _tasks.removeAt(i);
+        }),
       ),
     );
   }
@@ -732,7 +793,7 @@ class _TaskCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   const _TaskCard(
-      {required this.task, required this.onView, required this.onCancel, required this.onDelete});
+      {super.key, required this.task, required this.onView, required this.onCancel, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -753,6 +814,11 @@ class _TaskCard extends StatelessWidget {
                       style: const TextStyle(
                           fontWeight: FontWeight.w500, fontSize: 13),
                       overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${task.model} · ${task.device} · ${task.language == "auto" ? "auto" : task.language} · beam ${task.beamSize}',
+                    style: TextStyle(fontSize: 10, color: cs.onSurface.withValues(alpha:0.4)),
+                  ),
                   const SizedBox(height: 2),
                   _statusText(cs),
                   if (task.isActive) ...[
@@ -802,7 +868,7 @@ class _TaskCard extends StatelessWidget {
     return switch (task.status) {
       TaskStatus.queued =>
         Icon(Icons.schedule_outlined,
-            size: 18, color: cs.onSurface.withValues(alpha: 0.4)),
+            size: 18, color: cs.onSurface.withValues(alpha:0.4)),
       TaskStatus.running => SizedBox(
           width: 18, height: 18,
           child: CircularProgressIndicator(strokeWidth: 2, color: cs.primary)),
@@ -813,13 +879,13 @@ class _TaskCard extends StatelessWidget {
         Icon(Icons.error_outline, size: 18, color: cs.error),
       TaskStatus.cancelled =>
         Icon(Icons.cancel_outlined,
-            size: 18, color: cs.onSurface.withValues(alpha: 0.4)),
+            size: 18, color: cs.onSurface.withValues(alpha:0.4)),
     };
   }
 
   Widget _statusText(ColorScheme cs) {
     final style =
-        TextStyle(fontSize: 11, color: cs.onSurface.withValues(alpha: 0.5));
+        TextStyle(fontSize: 11, color: cs.onSurface.withValues(alpha:0.5));
     return switch (task.status) {
       TaskStatus.queued => Text('В очереди…', style: style),
       TaskStatus.running => Text(_translateStatus(task.statusText),
@@ -936,14 +1002,23 @@ class _ResultViewState extends State<_ResultView> {
       'vtt' => _toVtt(),
       _ => _toTxt(),
     };
-    final base = widget.task.fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
+    final base = p.basenameWithoutExtension(widget.task.fileName);
     final path = await FilePicker.platform
         .saveFile(dialogTitle: 'Сохранить $format', fileName: '$base.$format');
     if (path == null) return;
-    await File(path).writeAsString(content, encoding: utf8);
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Сохранено: $path')));
+    try {
+      await File(path).writeAsString(content, encoding: utf8);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Сохранено: $path')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Ошибка экспорта: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
     }
   }
 
@@ -998,7 +1073,7 @@ class _ResultViewState extends State<_ResultView> {
             child: Text('${filtered.length} сегментов',
                 style: TextStyle(
                     fontSize: 11,
-                    color: cs.onSurface.withValues(alpha: 0.4))),
+                    color: cs.onSurface.withValues(alpha:0.4))),
           ),
         ),
         const SizedBox(height: 4),
@@ -1008,6 +1083,7 @@ class _ResultViewState extends State<_ResultView> {
             itemCount: filtered.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (ctx, i) => _SegRow(
+              key: ValueKey(filtered[i].id),
               segment: filtered[i],
               query: _query,
               onCopy: () {
@@ -1048,7 +1124,8 @@ class _SegRow extends StatefulWidget {
   final void Function(String) onChanged;
 
   const _SegRow(
-      {required this.segment,
+      {super.key,
+      required this.segment,
       required this.query,
       required this.onCopy,
       required this.onChanged});
@@ -1065,6 +1142,15 @@ class _SegRowState extends State<_SegRow> {
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.segment.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SegRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.segment.id != widget.segment.id) {
+      _ctrl.text = widget.segment.text;
+      _editing = false;
+    }
   }
 
   @override
@@ -1087,7 +1173,7 @@ class _SegRowState extends State<_SegRow> {
               '${widget.segment.startFormatted}\n${widget.segment.endFormatted}',
               style: TextStyle(
                   fontSize: 10,
-                  color: cs.onSurface.withValues(alpha: 0.4),
+                  color: cs.onSurface.withValues(alpha:0.4),
                   height: 1.6,
                   fontFamily: 'monospace'),
             ),
@@ -1139,7 +1225,7 @@ class _SegRowState extends State<_SegRow> {
       spans.add(TextSpan(
         text: text.substring(idx, idx + query.length),
         style: TextStyle(
-            backgroundColor: cs.primary.withValues(alpha: 0.25),
+            backgroundColor: cs.primary.withValues(alpha:0.25),
             color: cs.primary),
       ));
       start = idx + query.length;
@@ -1170,7 +1256,7 @@ class _SectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w600,
           letterSpacing: 0.5,
           color:
-              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)));
+              Theme.of(context).colorScheme.onSurface.withValues(alpha:0.5)));
 }
 
 class _DlState {

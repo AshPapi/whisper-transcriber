@@ -44,6 +44,7 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
   }
 
   void _onEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
     final type = event['type'] as String?;
     final name = event['name'] as String?;
     if (name == null) return;
@@ -67,8 +68,12 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
         if (type == 'download_error') {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-                content: Text(
-                    'Download failed: ${event['msg'] ?? 'unknown error'}')),
+              content: Text('Download failed ($name): ${event['msg'] ?? 'unknown error'}'),
+              action: SnackBarAction(
+                label: 'Retry',
+                onPressed: () => _startDownload(name),
+              ),
+            ),
           );
         }
     }
@@ -88,7 +93,15 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
   }
 
   Future<void> _cancelDownload(String name) async {
-    await _backend.cancelDownload(name);
+    try {
+      await _backend.cancelDownload(name);
+    } catch (e) {
+      setState(() => _dlState.remove(name));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
   }
 
   Future<void> _delete(String name) async {
@@ -153,7 +166,7 @@ class _ModelManagerScreenState extends State<ModelManagerScreen> {
                             color: Theme.of(context)
                                 .colorScheme
                                 .onSurface
-                                .withValues(alpha: 0.3)),
+                                .withValues(alpha:0.3)),
                         const SizedBox(height: 12),
                         const Text('Could not load models'),
                         const SizedBox(height: 12),

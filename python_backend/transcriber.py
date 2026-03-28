@@ -61,6 +61,7 @@ class TranscribeWorker:
     def run(self):
         log.info("[%s] Task started: %s", self.task_id[:8], Path(self.audio_path).name)
         tmp_file = None
+        _terminal_called = False
         try:
             # Ensure ffmpeg is available
             ffmpeg_bin = "ffmpeg"
@@ -88,22 +89,38 @@ class TranscribeWorker:
             os.close(tmp_fd)
             tmp_file = tmp_path
 
-            result = subprocess.run(
-                [
-                    ffmpeg_bin, "-y", "-i", self.audio_path,
-                    "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                    tmp_path,
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            # Hide console window on Windows
+            extra_kwargs = {}
+            if os.name == 'nt':
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0  # SW_HIDE
+                extra_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                extra_kwargs['startupinfo'] = si
+
+            try:
+                result = subprocess.run(
+                    [
+                        ffmpeg_bin, "-y", "-i", self.audio_path,
+                        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                        tmp_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=300,
+                    **extra_kwargs,
+                )
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("ffmpeg timed out after 5 minutes")
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg error:\n{result.stderr[-500:]}")
             log.info("[%s] Audio converted to WAV: %s", self.task_id[:8], tmp_path)
 
             if self._stop.is_set():
+                _terminal_called = True
+                self.on_error(self.task_id, "cancelled")
                 return
 
             import torch
@@ -151,27 +168,64 @@ class TranscribeWorker:
                     raise
 
             if self._stop.is_set():
+                _terminal_called = True
+                self.on_error(self.task_id, "cancelled")
                 return
 
             self.on_status(self.task_id, "transcribing")
             log.info("[%s] Transcribing, fp16=%s, lang=%s, beam=%s",
                      self.task_id[:8], device != "cpu", self.language, self.beam_size)
 
+            # Load audio as numpy array to avoid whisper's internal ffmpeg call
+            # (whisper.load_audio spawns ffmpeg without CREATE_NO_WINDOW)
+            import numpy as np
+            import wave
+            try:
+                with wave.open(tmp_path, 'rb') as wf:
+                    raw = wf.readframes(wf.getnframes())
+                audio_array = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            except Exception:
+                # Fallback to whisper's loader if WAV reading fails
+                audio_array = tmp_path
+
             all_segments = []
 
             fp16 = device != "cpu"
+            _cuda_oom_types = (RuntimeError,)
+            try:
+                _cuda_oom_types = (RuntimeError, torch.cuda.OutOfMemoryError)
+            except AttributeError:
+                pass
             try:
                 result_data = model.transcribe(
-                    tmp_path,
+                    audio_array,
                     language=self.language,
                     beam_size=self.beam_size,
                     fp16=fp16,
                     verbose=False,
                 )
-            except RuntimeError as e:
-                if "CUDA" in str(e) or "fp16" in str(e).lower():
+            except _cuda_oom_types as e:
+                is_cuda_err = "CUDA" in str(e) or "fp16" in str(e).lower() or "out of memory" in str(e).lower()
+                if device != "cpu" and is_cuda_err:
+                    log.warning("[%s] CUDA OOM during transcribe, falling back to CPU: %s", self.task_id[:8], e)
+                    self.on_status(self.task_id, "transcribing (CPU fallback, VRAM недостаточно)")
+                    # Move model to CPU and free GPU memory
+                    try:
+                        model = model.to("cpu")
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    device = "cpu"
                     result_data = model.transcribe(
-                        tmp_path,
+                        audio_array,
+                        language=self.language,
+                        beam_size=self.beam_size,
+                        fp16=False,
+                        verbose=False,
+                    )
+                elif "fp16" in str(e).lower():
+                    result_data = model.transcribe(
+                        audio_array,
                         language=self.language,
                         beam_size=self.beam_size,
                         fp16=False,
@@ -199,12 +253,17 @@ class TranscribeWorker:
 
             if not self._stop.is_set():
                 log.info("[%s] Done: %d segments", self.task_id[:8], len(all_segments))
+                _terminal_called = True
                 self.on_finished(self.task_id, all_segments)
             else:
                 log.info("[%s] Cancelled", self.task_id[:8])
+                _terminal_called = True
+                self.on_error(self.task_id, "cancelled")
 
         except InterruptedError:
             log.info("[%s] Interrupted", self.task_id[:8])
+            _terminal_called = True
+            self.on_error(self.task_id, "interrupted")
         except Exception as e:
             tb = traceback.format_exc()
             log.error("[%s] Error: %s\n%s", self.task_id[:8], e, tb)
@@ -213,8 +272,15 @@ class TranscribeWorker:
                 log_path.write_text(tb, encoding="utf-8")
             except Exception:
                 pass
+            _terminal_called = True
             self.on_error(self.task_id, str(e))
         finally:
+            # Safety net: always fire a terminal callback so queue runner never hangs
+            if not _terminal_called:
+                try:
+                    self.on_error(self.task_id, "cancelled")
+                except Exception:
+                    pass
             # Free memory after task
             try:
                 del model

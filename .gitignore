@@ -35,3 +35,10 @@ whisper_error.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+CLAUDE.md
+.claude/
+
+# README
+README.md

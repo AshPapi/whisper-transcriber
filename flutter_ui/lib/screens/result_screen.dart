@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import '../models/models.dart';
 
 class ResultScreen extends StatefulWidget {
@@ -90,20 +91,26 @@ class _ResultScreenState extends State<ResultScreen> {
       _ => _toTxt(),
     };
 
-    final baseName =
-        widget.task.fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
+    final baseName = p.basenameWithoutExtension(widget.task.fileName);
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Save $format',
       fileName: '$baseName.$format',
     );
     if (path == null) return;
 
-    await File(path).writeAsString(content, encoding: utf8);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to $path')),
-      );
+    try {
+      await File(path).writeAsString(content, encoding: utf8);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved to $path')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e'), backgroundColor: Theme.of(context).colorScheme.error),
+        );
+      }
     }
   }
 
@@ -170,6 +177,7 @@ class _ResultScreenState extends State<ResultScreen> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (ctx, i) =>
                   _SegmentTile(
+                    key: ValueKey(filtered[i].id),
                     segment: filtered[i],
                     query: _query,
                     onCopy: () {
@@ -220,6 +228,7 @@ class _SegmentTile extends StatefulWidget {
   final void Function(String) onChanged;
 
   const _SegmentTile({
+    super.key,
     required this.segment,
     required this.query,
     required this.onCopy,
@@ -238,6 +247,15 @@ class _SegmentTileState extends State<_SegmentTile> {
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.segment.text);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SegmentTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.segment.id != widget.segment.id) {
+      _ctrl.text = widget.segment.text;
+      _editing = false;
+    }
   }
 
   @override

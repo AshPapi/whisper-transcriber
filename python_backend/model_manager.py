@@ -47,7 +47,11 @@ def scan_models(models_dir: str) -> list[str]:
 
 
 def model_path(name: str, models_dir: str) -> Path:
-    return Path(models_dir) / f"{name}.pt"
+    # Prevent path traversal
+    safe_name = Path(name).name
+    if safe_name != name or '..' in name or '/' in name or '\\' in name:
+        raise ValueError(f"Invalid model name: {name}")
+    return Path(models_dir) / f"{safe_name}.pt"
 
 
 def default_device() -> str:
@@ -93,57 +97,48 @@ def download_model(
     dest_dir = Path(models_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{name}.pt"
+    tmp_dest = dest_dir / f"{name}.pt.tmp"
 
     if dest.exists():
         return dest
 
-    import time
-    _start_time = [time.time()]
-    _last_bytes = [0]
-
-    def _reporthook(count, block_size, total_size):
-        if stop_event and stop_event.is_set():
-            raise InterruptedError("download cancelled")
-        bytes_done = min(count * block_size, total_size) if total_size > 0 else count * block_size
-        now = time.time()
-        elapsed = now - _start_time[0]
-        delta_bytes = bytes_done - _last_bytes[0]
-        speed = (delta_bytes / elapsed / 1_048_576) if elapsed > 0 else 0.0
-        _start_time[0] = now
-        _last_bytes[0] = bytes_done
-        on_progress(bytes_done, total_size, speed)
+    # Clean up leftover partial download
+    if tmp_dest.exists():
+        tmp_dest.unlink()
 
     try:
         import requests
         import certifi
-        with requests.get(url, stream=True, timeout=30, verify=certifi.where()) as r:
+        with requests.get(url, stream=True, timeout=(30, 60), verify=certifi.where()) as r:
             r.raise_for_status()
             total_size = int(r.headers.get('content-length', 0))
             bytes_done = 0
             block_size = 65536
             import time
-            _start_time[0] = time.time()
-            with open(dest, 'wb') as f:
+            _overall_start = time.time()
+            with open(tmp_dest, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=block_size):
                     if stop_event and stop_event.is_set():
                         raise InterruptedError("download cancelled")
                     if chunk:
                         f.write(chunk)
                         bytes_done += len(chunk)
-                        now = time.time()
-                        elapsed = now - _start_time[0]
-                        delta = bytes_done - _last_bytes[0]
-                        speed = (delta / elapsed / 1_048_576) if elapsed > 0 else 0.0
-                        _start_time[0] = now
-                        _last_bytes[0] = bytes_done
+                        elapsed = time.time() - _overall_start
+                        speed = (bytes_done / elapsed / 1_048_576) if elapsed > 0.1 else 0.0
                         on_progress(bytes_done, total_size, speed)
-    except InterruptedError:
+        # Move completed download to final path
+        import shutil
         if dest.exists():
-            dest.unlink()
+            tmp_dest.unlink()
+        else:
+            shutil.move(str(tmp_dest), str(dest))
+    except InterruptedError:
+        if tmp_dest.exists():
+            tmp_dest.unlink()
         raise
     except Exception:
-        if dest.exists():
-            dest.unlink()
+        if tmp_dest.exists():
+            tmp_dest.unlink()
         raise
 
     return dest

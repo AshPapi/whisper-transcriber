@@ -8,6 +8,7 @@ FastAPI backend для Whisper Transcriber.
 import asyncio
 import json
 import logging
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -109,22 +110,29 @@ async def websocket_endpoint(ws: WebSocket):
 
 @app.get("/models")
 def get_models():
-    return list_models(_models_dir())
+    models = list_models(_models_dir())
+    # Mark currently downloading models as not yet downloaded
+    for m in models:
+        if m["name"] in _download_stops:
+            m["downloaded"] = False
+            m["path"] = None
+    return models
 
 
 class DownloadRequest(BaseModel):
     name: str
 
 _download_stops: dict[str, threading.Event] = {}
+_download_lock = threading.Lock()
 
 @app.post("/models/download")
 def start_download(req: DownloadRequest):
     name = req.name
-    if name in _download_stops:
-        raise HTTPException(400, "Already downloading")
-
-    stop_event = threading.Event()
-    _download_stops[name] = stop_event
+    with _download_lock:
+        if name in _download_stops:
+            raise HTTPException(400, "Already downloading")
+        stop_event = threading.Event()
+        _download_stops[name] = stop_event
 
     def _run():
         try:
@@ -163,6 +171,15 @@ def cancel_download(name: str):
 
 @app.delete("/models/{name}")
 def remove_model(name: str):
+    if name in _download_stops:
+        raise HTTPException(409, "Model is currently downloading, cancel download first")
+    with _lock:
+        active = any(
+            t.get("model") == name and t.get("status") in ("queued", "running")
+            for t in _tasks.values()
+        )
+    if active:
+        raise HTTPException(409, "Model is in use by an active task")
     removed = delete_model(name, _models_dir())
     if not removed:
         raise HTTPException(404, "Model file not found")
@@ -244,11 +261,22 @@ def _on_segment(task_id, segment):
             _tasks[task_id]["segments"].append(segment)
     _broadcast_sync({"type": "segment", "task_id": task_id, "segment": segment})
 
+_MAX_COMPLETED_TASKS = 50
+
+def _prune_tasks():
+    """Remove oldest completed tasks if limit exceeded."""
+    completed = [tid for tid, t in _tasks.items()
+                 if t.get("status") in ("done", "error", "cancelled")]
+    if len(completed) > _MAX_COMPLETED_TASKS:
+        for tid in completed[:len(completed) - _MAX_COMPLETED_TASKS]:
+            _tasks.pop(tid, None)
+
 def _on_finished(task_id, segments):
     with _lock:
         if task_id in _tasks:
             _tasks[task_id]["status"] = "done"
             _tasks[task_id]["segments"] = segments
+        _prune_tasks()
     _broadcast_sync({"type": "task_done", "task_id": task_id})
     _signal_done(task_id)
 
@@ -330,20 +358,22 @@ def cancel_task(task_id: str):
 
 @app.get("/transcribe/{task_id}")
 def get_task(task_id: str):
+    import copy
     with _lock:
         task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    return task
+        if not task:
+            raise HTTPException(404, "Task not found")
+        return copy.deepcopy(task)
 
 
 @app.get("/transcribe/{task_id}/result")
 def get_result(task_id: str):
+    import copy
     with _lock:
         task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    return {"task_id": task_id, "segments": task.get("segments", [])}
+        if not task:
+            raise HTTPException(404, "Task not found")
+        return {"task_id": task_id, "segments": copy.deepcopy(task.get("segments", []))}
 
 # ── Devices ──────────────────────────────────────────────────────────────────
 
@@ -402,14 +432,29 @@ def update_settings(req: SettingsUpdate):
     return get_settings()
 
 
+_server = None  # uvicorn.Server instance, set in __main__
+
 def _watch_parent(parent_pid: int):
     """Exit when the parent Flutter process dies."""
-    import psutil, time, os, sys
+    import psutil, time
     while True:
         time.sleep(3)
         if not psutil.pid_exists(parent_pid):
             log.info("Parent process %d died, shutting down backend", parent_pid)
-            os._exit(0)
+            if _server:
+                _server.should_exit = True
+            else:
+                import os
+                os._exit(0)
+            break
+
+
+@app.post("/shutdown")
+def shutdown():
+    """Allow Flutter to request graceful backend shutdown."""
+    if _server:
+        _server.should_exit = True
+    return {"status": "shutting_down"}
 
 
 if __name__ == "__main__":
@@ -418,6 +463,13 @@ if __name__ == "__main__":
     import uvicorn
     import sys
     import atexit
+
+    # When bundled with console=False, stdout/stderr are None — redirect to devnull
+    # so uvicorn's logging doesn't crash on isatty() check
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, 'w')
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, 'w')
 
     log_file = Path.home() / "whisper_backend.log"
     pid_file = Path.home() / "whisper_backend.pid"
@@ -430,6 +482,7 @@ if __name__ == "__main__":
             logging.StreamHandler(),
         ],
     )
+
 
     # Kill previous backend instance via PID file
     import psutil, time
@@ -460,4 +513,8 @@ if __name__ == "__main__":
         except ValueError:
             pass
 
-    uvicorn.run(app, host="127.0.0.1", port=8765, reload=False, log_level="info")
+    import sys as _sys
+    config = uvicorn.Config(app, host="127.0.0.1", port=8765, reload=False, log_level="info")
+    srv = uvicorn.Server(config)
+    _sys.modules[__name__]._server = srv
+    srv.run()

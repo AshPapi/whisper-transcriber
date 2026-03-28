@@ -10,17 +10,25 @@ import 'theme/app_theme.dart';
 Process? _backendProcess;
 
 Future<void> _startBackend() async {
-  // If backend is already running and healthy, reuse it
-  if (await BackendService.instance.isAlive()) return;
+  // If backend is alive AND we own the process, reuse it
+  if (_backendProcess != null && await BackendService.instance.isAlive()) return;
+
+  // Kill orphan backend left by a previous Flutter instance
+  if (await BackendService.instance.isAlive()) {
+    await BackendService.instance.shutdown();
+    await Future.delayed(const Duration(milliseconds: 1500));
+  }
 
   final exeDir = p.dirname(Platform.resolvedExecutable);
-  final backendExe = p.join(exeDir, 'backend', 'backend', 'backend.exe');
+  final backendExe = p.join(exeDir, 'backend', 'backend.exe');
   if (!File(backendExe).existsSync()) return;
   // Pass our PID so backend can exit when Flutter closes
+  // Use fully detached mode: no pipes, no console window.
+  // The backend manages its own log file (~\whisper_backend.log).
   _backendProcess = await Process.start(
     backendExe, [pid.toString()],
     workingDirectory: p.dirname(backendExe),
-    mode: ProcessStartMode.normal,
+    mode: ProcessStartMode.detached,
   );
 }
 
@@ -38,19 +46,24 @@ Future<bool> _waitForBackend() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Catch all uncaught Flutter framework errors (prevents red screen crash)
+  final crashLog = File('${Platform.environment['USERPROFILE'] ?? Platform.environment['HOME']}/whisper_flutter_crash.log');
+
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
+    try {
+      crashLog.writeAsStringSync(
+        '[${DateTime.now()}] Flutter error:\n${details.exceptionAsString()}\n${details.stack}\n\n',
+        mode: FileMode.append,
+      );
+    } catch (_) {}
   };
 
-  // Catch all uncaught async errors in the zone (e.g. WebSocket exceptions)
-  runZonedGuarded(() async {
+  try {
     await _startBackend();
-    runApp(const WhisperApp());
-  }, (error, stack) {
-    // Swallow zone errors silently — app keeps running
-    debugPrint('Zone error (caught): $error');
-  });
+  } catch (e, st) {
+    try { crashLog.writeAsStringSync('[${DateTime.now()}] _startBackend error: $e\n$st\n\n', mode: FileMode.append); } catch (_) {}
+  }
+  runApp(const WhisperApp());
 }
 
 class WhisperApp extends StatefulWidget {
@@ -101,7 +114,10 @@ class _ShellState extends State<_Shell> {
       if (alive) BackendService.instance.connectWebSocket();
       _healthTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
         final alive = await BackendService.instance.isAlive();
-        if (mounted && alive != _alive) setState(() => _alive = alive);
+        if (mounted && alive != _alive) {
+          setState(() => _alive = alive);
+          if (alive) BackendService.instance.connectWebSocket();
+        }
       });
     });
   }
@@ -109,7 +125,7 @@ class _ShellState extends State<_Shell> {
   @override
   void dispose() {
     _healthTimer?.cancel();
-    BackendService.instance.dispose();
+    BackendService.instance.disconnectWebSocket();
     _backendProcess?.kill();
     super.dispose();
   }
@@ -161,7 +177,7 @@ class _ShellState extends State<_Shell> {
             Text('Первый запуск может занять до минуты',
                 style: TextStyle(
                     fontSize: 12,
-                    color: cs.onSurface.withValues(alpha: 0.5))),
+                    color: cs.onSurface.withValues(alpha:0.5))),
           ],
         ),
       );

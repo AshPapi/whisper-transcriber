@@ -7,6 +7,7 @@ import '../models/models.dart';
 
 const _baseUrl = 'http://127.0.0.1:8765';
 const _wsUrl = 'ws://127.0.0.1:8765/ws';
+const _httpTimeout = Duration(seconds: 15);
 
 class BackendService {
   static final BackendService instance = BackendService._();
@@ -16,21 +17,28 @@ class BackendService {
   StreamSubscription? _wsSub;
   final _eventController = StreamController<Map<String, dynamic>>.broadcast();
   bool _disposed = false;
-  bool _reconnecting = false; // guard against multiple reconnect loops
+  bool _reconnecting = false;
+  int _reconnectDelay = 2; // seconds, doubles on each attempt up to max
+  Timer? _reconnectTimer;
 
   Stream<Map<String, dynamic>> get events => _eventController.stream;
 
   void _scheduleReconnect() {
     if (_disposed || _reconnecting) return;
     _reconnecting = true;
-    Future.delayed(const Duration(seconds: 2), () {
+    _reconnectTimer = Timer(Duration(seconds: _reconnectDelay), () {
       _reconnecting = false;
+      _reconnectDelay = (_reconnectDelay * 2).clamp(2, 30);
       connectWebSocket();
     });
   }
 
   void connectWebSocket() {
     if (_disposed) return;
+    // Cancel any pending reconnect to avoid double-connect race
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnecting = false;
     // Close previous connection and subscription
     _wsSub?.cancel();
     _wsSub = null;
@@ -42,6 +50,7 @@ class BackendService {
         _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
         _wsSub = _channel!.stream.listen(
           (data) {
+            _reconnectDelay = 2; // reset backoff on successful message
             try {
               final event = json.decode(data as String) as Map<String, dynamic>;
               if (!_eventController.isClosed) {
@@ -62,19 +71,23 @@ class BackendService {
     });
   }
 
-  void dispose() {
-    _disposed = true;
+  void disconnectWebSocket() {
     _wsSub?.cancel();
     _wsSub = null;
     try { _channel?.sink.close(); } catch (_) {}
     _channel = null;
+  }
+
+  void dispose() {
+    _disposed = true;
+    disconnectWebSocket();
     _eventController.close();
   }
 
   // ── Models ────────────────────────────────────────────────────────────────
 
   Future<List<WhisperModel>> getModels() async {
-    final resp = await http.get(Uri.parse('$_baseUrl/models'));
+    final resp = await http.get(Uri.parse('$_baseUrl/models')).timeout(_httpTimeout);
     _checkStatus(resp);
     final list = json.decode(resp.body) as List;
     return list
@@ -87,18 +100,18 @@ class BackendService {
       Uri.parse('$_baseUrl/models/download'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'name': name}),
-    );
+    ).timeout(_httpTimeout);
     _checkStatus(resp);
   }
 
   Future<void> cancelDownload(String name) async {
     final resp =
-        await http.delete(Uri.parse('$_baseUrl/models/download/$name'));
+        await http.delete(Uri.parse('$_baseUrl/models/download/$name')).timeout(_httpTimeout);
     _checkStatus(resp);
   }
 
   Future<void> deleteModel(String name) async {
-    final resp = await http.delete(Uri.parse('$_baseUrl/models/$name'));
+    final resp = await http.delete(Uri.parse('$_baseUrl/models/$name')).timeout(_httpTimeout);
     _checkStatus(resp);
   }
 
@@ -122,7 +135,7 @@ class BackendService {
       Uri.parse('$_baseUrl/transcribe'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode(body),
-    );
+    ).timeout(_httpTimeout);
     _checkStatus(resp);
     final data = json.decode(resp.body) as Map<String, dynamic>;
     return List<String>.from(data['task_ids'] as List);
@@ -130,13 +143,13 @@ class BackendService {
 
   Future<void> cancelTask(String taskId) async {
     final resp =
-        await http.delete(Uri.parse('$_baseUrl/transcribe/$taskId'));
+        await http.delete(Uri.parse('$_baseUrl/transcribe/$taskId')).timeout(_httpTimeout);
     _checkStatus(resp);
   }
 
   Future<List<Segment>> getResult(String taskId) async {
     final resp =
-        await http.get(Uri.parse('$_baseUrl/transcribe/$taskId/result'));
+        await http.get(Uri.parse('$_baseUrl/transcribe/$taskId/result')).timeout(_httpTimeout);
     _checkStatus(resp);
     final data = json.decode(resp.body) as Map<String, dynamic>;
     final list = data['segments'] as List;
@@ -149,7 +162,7 @@ class BackendService {
 
   Future<List<Map<String, String>>> getDevices() async {
     try {
-      final resp = await http.get(Uri.parse('$_baseUrl/devices'));
+      final resp = await http.get(Uri.parse('$_baseUrl/devices')).timeout(_httpTimeout);
       _checkStatus(resp);
       final list = json.decode(resp.body) as List;
       return list
@@ -166,7 +179,7 @@ class BackendService {
   // ── Settings ──────────────────────────────────────────────────────────────
 
   Future<AppSettings> getSettings() async {
-    final resp = await http.get(Uri.parse('$_baseUrl/settings'));
+    final resp = await http.get(Uri.parse('$_baseUrl/settings')).timeout(_httpTimeout);
     _checkStatus(resp);
     return AppSettings.fromJson(
         json.decode(resp.body) as Map<String, dynamic>);
@@ -177,13 +190,24 @@ class BackendService {
       Uri.parse('$_baseUrl/settings'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode(patch),
-    );
+    ).timeout(_httpTimeout);
     _checkStatus(resp);
     return AppSettings.fromJson(
         json.decode(resp.body) as Map<String, dynamic>);
   }
 
   // ── Health ────────────────────────────────────────────────────────────────
+
+  /// Request the backend to shut down gracefully.
+  Future<void> shutdown() async {
+    try {
+      await http
+          .post(Uri.parse('$_baseUrl/shutdown'))
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      // Backend may already be dead — ignore.
+    }
+  }
 
   Future<bool> isAlive() async {
     try {

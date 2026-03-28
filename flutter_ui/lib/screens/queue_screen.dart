@@ -75,6 +75,16 @@ class _TaskCard extends StatelessWidget {
 
   const _TaskCard({required this.task, required this.onViewResult});
 
+  double? _progressValue(TranscribeTask task) {
+    if (task.status == TaskStatus.queued) return null;
+    final s = task.statusText;
+    if (s.startsWith('transcribing:')) {
+      final pct = int.tryParse(s.split(':').last);
+      if (pct != null) return pct / 100.0;
+    }
+    return null; // indeterminate for loading_model, extracting_audio etc.
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -103,7 +113,7 @@ class _TaskCard extends StatelessWidget {
                     const SizedBox(height: 8),
                     LinearProgressIndicator(
                       borderRadius: BorderRadius.circular(4),
-                      value: task.status == TaskStatus.queued ? null : null,
+                      value: _progressValue(task),
                     ),
                   ],
                 ],
@@ -188,11 +198,15 @@ class _StatusRow extends StatelessWidget {
     if (s.startsWith('loading_model:')) {
       return 'Loading model on ${s.split(':').last}…';
     }
+    if (s.startsWith('transcribing:')) {
+      final pct = s.split(':').last;
+      return 'Transcribing… $pct%';
+    }
     return switch (s) {
       'extracting_audio' => 'Extracting audio…',
       'converting_audio' => 'Converting audio…',
       'transcribing' => 'Transcribing…',
-      _ => s,
+      _ => 'Processing…',
     };
   }
 }
