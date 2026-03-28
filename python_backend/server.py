@@ -407,8 +407,11 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()  # required for PyInstaller on Windows
     import uvicorn
     import sys
+    import atexit
 
     log_file = Path.home() / "whisper_backend.log"
+    pid_file = Path.home() / "whisper_backend.pid"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -417,7 +420,23 @@ if __name__ == "__main__":
             logging.StreamHandler(),
         ],
     )
-    logging.getLogger("whisper-backend").info("Backend starting, log: %s", log_file)
+
+    # Kill previous backend instance via PID file
+    if pid_file.exists():
+        try:
+            old_pid = int(pid_file.read_text().strip())
+            import psutil
+            if psutil.pid_exists(old_pid):
+                psutil.Process(old_pid).kill()
+                log.info("Killed old backend PID %d", old_pid)
+        except Exception as e:
+            log.warning("Could not kill old backend: %s", e)
+
+    # Write own PID
+    pid_file.write_text(str(os.getpid()))
+    atexit.register(lambda: pid_file.unlink(missing_ok=True))
+
+    log.info("Backend starting (PID %d), log: %s", os.getpid(), log_file)
 
     # Watch parent Flutter process and exit when it dies
     if len(sys.argv) > 1:
