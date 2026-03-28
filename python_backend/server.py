@@ -432,13 +432,14 @@ if __name__ == "__main__":
     )
 
     # Kill previous backend instance via PID file
+    import psutil, time
     if pid_file.exists():
         try:
             old_pid = int(pid_file.read_text().strip())
-            import psutil
             if psutil.pid_exists(old_pid):
                 psutil.Process(old_pid).kill()
                 log.info("Killed old backend PID %d", old_pid)
+                time.sleep(1)  # Wait for port to be released
         except Exception as e:
             log.warning("Could not kill old backend: %s", e)
 
