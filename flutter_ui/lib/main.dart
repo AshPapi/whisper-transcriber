@@ -9,9 +9,33 @@ import 'theme/app_theme.dart';
 
 Process? _backendProcess;
 
+Future<void> _killOldBackend() async {
+  // Kill any process occupying port 8765
+  try {
+    final result = await Process.run(
+      'netstat', ['-ano'],
+      runInShell: true,
+    );
+    for (final line in result.stdout.toString().split('\n')) {
+      if (line.contains(':8765') && line.contains('LISTENING')) {
+        final parts = line.trim().split(RegExp(r'\s+'));
+        final pid = parts.last.trim();
+        if (pid.isNotEmpty && int.tryParse(pid) != null) {
+          await Process.run('taskkill', ['/F', '/PID', pid], runInShell: true);
+        }
+      }
+    }
+    // Give OS time to release the port
+    await Future.delayed(const Duration(milliseconds: 500));
+  } catch (_) {}
+}
+
 Future<void> _startBackend() async {
-  // If backend is already running (e.g. previous instance), reuse it
+  // If backend is already running and healthy, reuse it
   if (await BackendService.instance.isAlive()) return;
+
+  // Kill any zombie process on port 8765
+  await _killOldBackend();
 
   final exeDir = p.dirname(Platform.resolvedExecutable);
   final backendExe = p.join(exeDir, 'backend', 'backend.exe');
