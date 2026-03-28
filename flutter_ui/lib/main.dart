@@ -126,9 +126,15 @@ class _ShellState extends State<_Shell> {
         ]),
         actions: [
           Tooltip(
-            message: _alive ? 'Бэкенд работает' : 'Бэкенд недоступен',
-            child: Icon(Icons.circle,
-                size: 9, color: _alive ? Colors.green : Colors.red),
+            message: _ready
+                ? (_alive ? 'Бэкенд работает' : 'Бэкенд недоступен')
+                : 'Запуск бэкенда…',
+            child: _ready
+                ? Icon(Icons.circle,
+                    size: 9, color: _alive ? Colors.green : Colors.red)
+                : const SizedBox(
+                    width: 9, height: 9,
+                    child: CircularProgressIndicator(strokeWidth: 1.5)),
           ),
           const SizedBox(width: 6),
           IconButton(
