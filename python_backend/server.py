@@ -189,6 +189,16 @@ async def _startup():
     _main_loop = asyncio.get_event_loop()
     _task_queue = asyncio.Queue()
     asyncio.create_task(_queue_runner())
+    # Pre-warm whisper import in background so first download doesn't block
+    threading.Thread(target=_prewarm_whisper, daemon=True).start()
+
+def _prewarm_whisper():
+    try:
+        from model_manager import _get_model_urls
+        _get_model_urls()
+        log.info("Whisper URLs pre-warmed")
+    except Exception as e:
+        log.warning("Whisper pre-warm failed: %s", e)
 
 async def _queue_runner():
     while True:

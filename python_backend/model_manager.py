@@ -20,10 +20,16 @@ WHISPER_MODELS = [
 ]
 
 
+_model_urls_cache: dict = {}
+
 def _get_model_urls() -> dict:
+    global _model_urls_cache
+    if _model_urls_cache:
+        return _model_urls_cache
     try:
         import whisper
-        return dict(whisper._MODELS)
+        _model_urls_cache = dict(whisper._MODELS)
+        return _model_urls_cache
     except ImportError:
         return {}
 
