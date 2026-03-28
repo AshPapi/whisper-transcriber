@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller
+python_backend/dist/
+python_backend/build/
+python_backend/*.spec
+
+# Flutter
+flutter_ui/build/
+flutter_ui/.dart_tool/
+flutter_ui/.flutter-plugins
+flutter_ui/.flutter-plugins-dependencies
+
+# Logs
+*.log
+whisper_backend.log
+whisper_error.log
+
+# Models (large files)
+*.pt
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

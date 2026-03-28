@@ -1,4 +1,0 @@
-openai-whisper>=20231117
-flet>=0.24.0
-numpy>=1.24.0
-static-ffmpeg>=2.5

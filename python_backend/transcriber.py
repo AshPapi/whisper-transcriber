@@ -3,6 +3,7 @@ TranscribeWorker — запускает ffmpeg + openai-whisper в отдель�
 Сегменты передаются через on_segment callback по мере появления.
 """
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -10,6 +11,8 @@ import threading
 import traceback
 from pathlib import Path
 from typing import Callable, Optional
+
+log = logging.getLogger("whisper-backend")
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v"}
@@ -56,12 +59,19 @@ class TranscribeWorker:
         self._stop.set()
 
     def run(self):
+        log.info("[%s] Task started: %s", self.task_id[:8], Path(self.audio_path).name)
         tmp_file = None
         try:
             # Ensure ffmpeg is available
+            ffmpeg_bin = "ffmpeg"
             try:
                 import static_ffmpeg
                 static_ffmpeg.add_paths()
+                # Get the actual binary path to avoid PATH lookup issues on Windows
+                try:
+                    ffmpeg_bin = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()[0]
+                except Exception:
+                    pass
             except ImportError:
                 pass
 
@@ -73,13 +83,14 @@ class TranscribeWorker:
                 "extracting_audio" if suffix in VIDEO_EXTENSIONS else "converting_audio",
             )
 
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+            # Use a short temp path to avoid issues with long/special-char paths on Windows
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", dir=tempfile.gettempdir())
             os.close(tmp_fd)
             tmp_file = tmp_path
 
             result = subprocess.run(
                 [
-                    "ffmpeg", "-y", "-i", self.audio_path,
+                    ffmpeg_bin, "-y", "-i", self.audio_path,
                     "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                     tmp_path,
                 ],
@@ -90,6 +101,7 @@ class TranscribeWorker:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg error:\n{result.stderr[-500:]}")
+            log.info("[%s] Audio converted to WAV: %s", self.task_id[:8], tmp_path)
 
             if self._stop.is_set():
                 return
@@ -123,16 +135,31 @@ class TranscribeWorker:
                             device = f"cuda:{best}"
 
             self.on_status(self.task_id, f"loading_model:{device.upper()}")
-            model = whisper.load_model(self.model_path, device=device)
+            log.info("[%s] Loading model %s on %s", self.task_id[:8], self.model_path, device)
+            try:
+                model = whisper.load_model(self.model_path, device=device)
+                log.info("[%s] Model loaded on %s", self.task_id[:8], device)
+            except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
+                if device != "cpu" and ("memory" in str(e).lower() or "CUDA" in str(e)):
+                    log.warning("[%s] Not enough VRAM (%s), falling back to CPU", self.task_id[:8], e)
+                    device = "cpu"
+                    self.on_status(self.task_id, "loading_model:CPU (VRAM недостаточно)")
+                    torch.cuda.empty_cache()
+                    model = whisper.load_model(self.model_path, device="cpu")
+                    log.info("[%s] Model loaded on CPU (fallback)", self.task_id[:8])
+                else:
+                    raise
 
             if self._stop.is_set():
                 return
 
             self.on_status(self.task_id, "transcribing")
+            log.info("[%s] Transcribing, fp16=%s, lang=%s, beam=%s",
+                     self.task_id[:8], device != "cpu", self.language, self.beam_size)
 
             all_segments = []
 
-            fp16 = (device != "cpu")
+            fp16 = device != "cpu"
             try:
                 result_data = model.transcribe(
                     tmp_path,
@@ -171,19 +198,36 @@ class TranscribeWorker:
                     self.on_status(self.task_id, f"transcribing:{pct}")
 
             if not self._stop.is_set():
+                log.info("[%s] Done: %d segments", self.task_id[:8], len(all_segments))
                 self.on_finished(self.task_id, all_segments)
+            else:
+                log.info("[%s] Cancelled", self.task_id[:8])
 
         except InterruptedError:
-            pass
+            log.info("[%s] Interrupted", self.task_id[:8])
         except Exception as e:
-            log_path = Path(self.audio_path).parent / "error.log"
+            tb = traceback.format_exc()
+            log.error("[%s] Error: %s\n%s", self.task_id[:8], e, tb)
             try:
-                log_path.write_text(traceback.format_exc(), encoding="utf-8")
+                log_path = Path.home() / "whisper_error.log"
+                log_path.write_text(tb, encoding="utf-8")
             except Exception:
-                Path.home().joinpath("whisper_error.log").write_text(
-                    traceback.format_exc(), encoding="utf-8"
-                )
+                pass
             self.on_error(self.task_id, str(e))
         finally:
+            # Free memory after task
+            try:
+                del model
+            except Exception:
+                pass
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            import gc
+            gc.collect()
+            log.info("[%s] Memory freed", self.task_id[:8])
             if tmp_file and os.path.exists(tmp_file):
                 os.remove(tmp_file)

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'screens/app_screen.dart';
@@ -34,8 +35,20 @@ Future<void> _waitForBackend() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await _startBackend();
-  runApp(const WhisperApp());
+
+  // Catch all uncaught Flutter framework errors (prevents red screen crash)
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+
+  // Catch all uncaught async errors in the zone (e.g. WebSocket exceptions)
+  runZonedGuarded(() async {
+    await _startBackend();
+    runApp(const WhisperApp());
+  }, (error, stack) {
+    // Swallow zone errors silently — app keeps running
+    debugPrint('Zone error (caught): $error');
+  });
 }
 
 class WhisperApp extends StatefulWidget {

@@ -138,6 +138,18 @@ class _AppScreenState extends State<AppScreen> {
     } catch (_) {}
   }
 
+  Future<void> _cancelDownload(String name) async {
+    try {
+      await _backend.cancelDownload(name);
+      setState(() => _dlState.remove(name));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
+  }
+
   Future<void> _loadModelsOnly() async {
     try {
       final models = await _backend.getModels();
@@ -150,6 +162,9 @@ class _AppScreenState extends State<AppScreen> {
           return m;
         }).toList();
         final downloaded = models.where((m) => m.downloaded).toList();
+        if (_selectedModel != null && !downloaded.any((m) => m.name == _selectedModel)) {
+          _selectedModel = null;
+        }
         if (downloaded.isNotEmpty && _selectedModel == null) {
           _selectedModel = downloaded
               .firstWhere((m) => m.name == 'turbo',
@@ -289,6 +304,9 @@ class _AppScreenState extends State<AppScreen> {
     if (ok != true) return;
     try {
       await _backend.deleteModel(name);
+      if (_selectedModel == name) {
+        setState(() => _selectedModel = null);
+      }
       _loadData();
     } catch (e) {
       if (mounted) {
@@ -446,6 +464,10 @@ class _AppScreenState extends State<AppScreen> {
                       labelText: 'Модель', isDense: true),
                   items: _allModels
                       .where((m) => m.downloaded)
+                      .fold<List<WhisperModel>>([], (acc, m) {
+                        if (!acc.any((x) => x.name == m.name)) acc.add(m);
+                        return acc;
+                      })
                       .map((m) => DropdownMenuItem(
                           value: m.name, child: Text(m.name)))
                       .toList(),
@@ -460,7 +482,6 @@ class _AppScreenState extends State<AppScreen> {
           Row(
             children: [
               Expanded(
-                flex: 3,
                 child: DropdownButtonFormField<String>(
                   value: _lang,
                   decoration: const InputDecoration(
@@ -473,33 +494,16 @@ class _AppScreenState extends State<AppScreen> {
                     setState(() => _lang = v!);
                     _backend.updateSettings({'lang': v});
                   },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: DropdownButtonFormField<String>(
-                  value: _devices.any((d) => d['id'] == _device) ? _device : _devices.first['id'],
-                  decoration: const InputDecoration(
-                      labelText: 'Устройство', isDense: true),
-                  items: _devices
-                      .map((d) => DropdownMenuItem(
-                          value: d['id'], child: Text(d['name']!, overflow: TextOverflow.ellipsis)))
-                      .toList(),
-                  onChanged: (v) {
-                    setState(() => _device = v!);
-                    _backend.updateSettings({'device': v});
-                  },
                   isExpanded: true,
                 ),
               ),
               const SizedBox(width: 8),
               SizedBox(
-                width: 60,
+                width: 55,
                 child: TextFormField(
                   initialValue: _beam.toString(),
                   decoration: const InputDecoration(
-                      labelText: 'Beam size', isDense: true),
+                      labelText: 'Beam', isDense: true),
                   keyboardType: TextInputType.number,
                   onChanged: (v) {
                     final n = int.tryParse(v);
@@ -511,6 +515,21 @@ class _AppScreenState extends State<AppScreen> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _devices.any((d) => d['id'] == _device) ? _device : _devices.first['id'],
+            decoration: const InputDecoration(
+                labelText: 'Устройство', isDense: true),
+            items: _devices
+                .map((d) => DropdownMenuItem(
+                    value: d['id'], child: Text(d['name']!, overflow: TextOverflow.ellipsis)))
+                .toList(),
+            onChanged: (v) {
+              setState(() => _device = v!);
+              _backend.updateSettings({'device': v});
+            },
+            isExpanded: true,
           ),
         ],
       );
@@ -600,10 +619,14 @@ class _AppScreenState extends State<AppScreen> {
               ],
               const Spacer(),
               if (isDownloading)
-                SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: cs.primary),
+                InkWell(
+                  onTap: () => _cancelDownload(m.name),
+                  borderRadius: BorderRadius.circular(4),
+                  child: Tooltip(
+                    message: 'Отменить загрузку',
+                    child: Icon(Icons.cancel_outlined, size: 16,
+                        color: cs.error),
+                  ),
                 )
               else if (m.downloaded)
                 InkWell(

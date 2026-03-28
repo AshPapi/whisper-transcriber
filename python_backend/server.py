@@ -94,11 +94,16 @@ def _broadcast_sync(event: dict):
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     _ws_clients.add(ws)
+    log.info("WebSocket connected, total clients: %d", len(_ws_clients))
     try:
         while True:
             await ws.receive_text()  # keep-alive
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as e:
         _ws_clients.discard(ws)
+        log.info("WebSocket disconnected (code=%s), total clients: %d", e.code, len(_ws_clients))
+    except Exception as e:
+        _ws_clients.discard(ws)
+        log.warning("WebSocket error: %s, total clients: %d", e, len(_ws_clients))
 
 # ── Models ───────────────────────────────────────────────────────────────────
 
@@ -340,8 +345,9 @@ def get_devices():
                     "id": f"cuda:{i}",
                     "name": f"{props.name} ({mem_gb} GB)",
                 })
-            # "auto" option selects GPU with most VRAM
-            devices.append({"id": "cuda", "name": "CUDA (авто)" if n > 1 else "CUDA"})
+            # "auto" option — only add if multiple GPUs, otherwise cuda:0 is sufficient
+            if n > 1:
+                devices.append({"id": "cuda", "name": "CUDA (авто — лучший GPU)"})
     except Exception:
         pass
     return devices
@@ -383,4 +389,16 @@ if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()  # required for PyInstaller on Windows
     import uvicorn
+
+    log_file = Path.home() / "whisper_backend.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+    logging.getLogger("whisper-backend").info("Backend starting, log: %s", log_file)
+
     uvicorn.run(app, host="127.0.0.1", port=8765, reload=False, log_level="info")

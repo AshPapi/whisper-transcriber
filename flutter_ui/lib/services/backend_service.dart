@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/models.dart';
@@ -26,33 +27,41 @@ class BackendService {
     try { _channel?.sink.close(); } catch (_) {}
     _channel = null;
 
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
-      _wsSub = _channel!.stream.listen(
-        (data) {
-          try {
-            final event = json.decode(data as String) as Map<String, dynamic>;
-            if (!_eventController.isClosed) {
-              _eventController.add(event);
+    runZonedGuarded(() {
+      try {
+        _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+        _wsSub = _channel!.stream.listen(
+          (data) {
+            try {
+              final event = json.decode(data as String) as Map<String, dynamic>;
+              if (!_eventController.isClosed) {
+                _eventController.add(event);
+              }
+            } catch (_) {}
+          },
+          onDone: () {
+            if (!_disposed) {
+              Future.delayed(const Duration(seconds: 2), connectWebSocket);
             }
-          } catch (_) {}
-        },
-        onDone: () {
-          if (!_disposed) {
-            Future.delayed(const Duration(seconds: 2), connectWebSocket);
-          }
-        },
-        onError: (_) {
-          if (!_disposed) {
-            Future.delayed(const Duration(seconds: 2), connectWebSocket);
-          }
-        },
-      );
-    } catch (_) {
+          },
+          onError: (_) {
+            if (!_disposed) {
+              Future.delayed(const Duration(seconds: 2), connectWebSocket);
+            }
+          },
+          cancelOnError: false,
+        );
+      } catch (_) {
+        if (!_disposed) {
+          Future.delayed(const Duration(seconds: 2), connectWebSocket);
+        }
+      }
+    }, (error, stack) {
+      // Catch any uncaught WebSocket errors to prevent app crash
       if (!_disposed) {
         Future.delayed(const Duration(seconds: 2), connectWebSocket);
       }
-    }
+    });
   }
 
   void dispose() {
