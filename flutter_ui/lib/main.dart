@@ -47,14 +47,15 @@ Future<void> _startBackend() async {
   );
 }
 
-Future<void> _waitForBackend() async {
+Future<bool> _waitForBackend() async {
   const timeout = Duration(seconds: 90);
   const interval = Duration(milliseconds: 500);
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
-    if (await BackendService.instance.isAlive()) return;
+    if (await BackendService.instance.isAlive()) return true;
     await Future.delayed(interval);
   }
+  return false;
 }
 
 void main() async {
@@ -117,10 +118,10 @@ class _ShellState extends State<_Shell> {
   @override
   void initState() {
     super.initState();
-    _waitForBackend().then((_) {
+    _waitForBackend().then((alive) {
       if (!mounted) return;
-      setState(() { _ready = true; _alive = true; });
-      BackendService.instance.connectWebSocket();
+      setState(() { _ready = true; _alive = alive; });
+      if (alive) BackendService.instance.connectWebSocket();
       _healthTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
         final alive = await BackendService.instance.isAlive();
         if (mounted && alive != _alive) setState(() => _alive = alive);

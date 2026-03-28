@@ -224,7 +224,7 @@ def _signal_done(task_id: str):
 def _on_status(task_id, status):
     with _lock:
         if task_id in _tasks:
-            _tasks[task_id]["status"] = "running"
+            _tasks[task_id]["status"] = status  # fix: was hardcoded "running"
             _tasks[task_id]["status_text"] = status
     _broadcast_sync({"type": "task_status", "task_id": task_id, "status": status})
 
@@ -281,6 +281,9 @@ async def add_transcribe(req: TranscribeRequest):
             on_error=_on_error,
         )
 
+        # Create event BEFORE putting on queue to avoid race condition
+        _task_done_events[task_id] = asyncio.Event()
+
         with _lock:
             _tasks[task_id] = {
                 "task_id": task_id,
@@ -291,7 +294,6 @@ async def add_transcribe(req: TranscribeRequest):
             }
             _workers[task_id] = worker
 
-        _task_done_events[task_id] = asyncio.Event()
         await _task_queue.put(task_id)
         task_ids.append(task_id)
 
@@ -301,13 +303,18 @@ async def add_transcribe(req: TranscribeRequest):
 @app.delete("/transcribe/{task_id}")
 def cancel_task(task_id: str):
     with _lock:
-        worker = _workers.get(task_id)
-        if not worker:
+        task = _tasks.get(task_id)
+        if not task:
             raise HTTPException(404, "Task not found")
-        worker.stop()
-        if task_id in _tasks:
-            _tasks[task_id]["status"] = "cancelled"
-    _signal_done(task_id)
+        worker = _workers.get(task_id)
+        was_queued = task.get("status") == "queued"
+        task["status"] = "cancelled"
+        if worker:
+            worker.stop()
+    # Only signal done if task was queued (not yet started by worker thread)
+    # If running, the worker's _on_finished/_on_error will signal done
+    if was_queued:
+        _signal_done(task_id)
     return {"status": "cancelled"}
 
 

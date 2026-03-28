@@ -238,8 +238,8 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   void _addFiles(List<String> paths) {
-    final valid = paths.where((p) {
-      final ext = p.split('.').last.toLowerCase();
+    final valid = paths.where((filePath) {
+      final ext = filePath.split('.').last.toLowerCase();
       return _supportedExt.contains(ext);
     }).toList();
     if (valid.isEmpty) return;

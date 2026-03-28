@@ -16,8 +16,18 @@ class BackendService {
   StreamSubscription? _wsSub;
   final _eventController = StreamController<Map<String, dynamic>>.broadcast();
   bool _disposed = false;
+  bool _reconnecting = false; // guard against multiple reconnect loops
 
   Stream<Map<String, dynamic>> get events => _eventController.stream;
+
+  void _scheduleReconnect() {
+    if (_disposed || _reconnecting) return;
+    _reconnecting = true;
+    Future.delayed(const Duration(seconds: 2), () {
+      _reconnecting = false;
+      connectWebSocket();
+    });
+  }
 
   void connectWebSocket() {
     if (_disposed) return;
@@ -39,28 +49,16 @@ class BackendService {
               }
             } catch (_) {}
           },
-          onDone: () {
-            if (!_disposed) {
-              Future.delayed(const Duration(seconds: 2), connectWebSocket);
-            }
-          },
-          onError: (_) {
-            if (!_disposed) {
-              Future.delayed(const Duration(seconds: 2), connectWebSocket);
-            }
-          },
+          onDone: () => _scheduleReconnect(),
+          onError: (_) => _scheduleReconnect(),
           cancelOnError: false,
         );
       } catch (_) {
-        if (!_disposed) {
-          Future.delayed(const Duration(seconds: 2), connectWebSocket);
-        }
+        _scheduleReconnect();
       }
     }, (error, stack) {
       // Catch any uncaught WebSocket errors to prevent app crash
-      if (!_disposed) {
-        Future.delayed(const Duration(seconds: 2), connectWebSocket);
-      }
+      _scheduleReconnect();
     });
   }
 
